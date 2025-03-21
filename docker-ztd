@@ -151,12 +151,64 @@ generate_traefik_conf() {
         else . end
       );
 
+    def extract_health_check(item):
+      if (
+        (item["traefik.http.services." + item["com.docker.compose.service"] + ".loadbalancer.healthCheck.path"] // "") == "" and
+        (item["traefik.http.services." + item["com.docker.compose.service"] + ".loadbalancer.healthCheck.interval"] // "") == "" and
+        (item["traefik.http.services." + item["com.docker.compose.service"] + ".loadbalancer.healthCheck.timeout"] // "") == "" and
+        (item["traefik.http.services." + item["com.docker.compose.service"] + ".loadbalancer.healthCheck.scheme"] // "") == "" and
+        (item["traefik.http.services." + item["com.docker.compose.service"] + ".loadbalancer.healthCheck.mode"] // "") == "" and
+        (item["traefik.http.services." + item["com.docker.compose.service"] + ".loadbalancer.healthCheck.hostname"] // "") == "" and
+        (item["traefik.http.services." + item["com.docker.compose.service"] + ".loadbalancer.healthCheck.port"] // "") == "" and
+        (item["traefik.http.services." + item["com.docker.compose.service"] + ".loadbalancer.healthCheck.followRedirects"] // "") == "" and
+        (item["traefik.http.services." + item["com.docker.compose.service"] + ".loadbalancer.healthCheck.method"] // "") == "" and
+        (item["traefik.http.services." + item["com.docker.compose.service"] + ".loadbalancer.healthCheck.status"] // "") == ""
+      ) then
+        empty
+      else
+        {
+          path: (item["traefik.http.services." + item["com.docker.compose.service"] + ".loadbalancer.healthCheck.path"] // ""),
+          interval: (item["traefik.http.services." + item["com.docker.compose.service"] + ".loadbalancer.healthCheck.interval"] // ""),
+          timeout: (item["traefik.http.services." + item["com.docker.compose.service"] + ".loadbalancer.healthCheck.timeout"] // ""),
+          scheme: (item["traefik.http.services." + item["com.docker.compose.service"] + ".loadbalancer.healthCheck.scheme"] // ""),
+          mode: (item["traefik.http.services." + item["com.docker.compose.service"] + ".loadbalancer.healthCheck.mode"] // ""),
+          hostname: (item["traefik.http.services." + item["com.docker.compose.service"] + ".loadbalancer.healthCheck.hostname"] // ""),
+          port: (item["traefik.http.services." + item["com.docker.compose.service"] + ".loadbalancer.healthCheck.port"] // ""),
+          followRedirects: (item["traefik.http.services." + item["com.docker.compose.service"] + ".loadbalancer.healthCheck.followRedirects"] // ""),
+          method: (item["traefik.http.services." + item["com.docker.compose.service"] + ".loadbalancer.healthCheck.method"] // ""),
+          status: (item["traefik.http.services." + item["com.docker.compose.service"] + ".loadbalancer.healthCheck.status"] // ""),
+          headers: (
+            item | to_entries | 
+            map(select(.key | startswith("traefik.http.services." + item["com.docker.compose.service"] + ".loadbalancer.healthCheck.headers."))) |
+            map({
+              key: (.key | split(".") | .[-1]), 
+              value: .value
+            }) |
+            from_entries
+          ), 
+        } | with_entries(select(.value != "" and .value != {}))
+      
+      end;
+
+
+
     reduce .[] as $item ({}; 
       if ($item["com.docker.compose.service"] | in(split_ips)) then
+
         .http.routers[$item["com.docker.compose.service"]].rule = $item["traefik.http.routers.\($item["com.docker.compose.service"]).rule"] // null |
         .http.routers[$item["com.docker.compose.service"]].service = $item["com.docker.compose.service"] |
         .http.services[$item["com.docker.compose.service"]].loadBalancer.servers = 
-          (split_ips[$item["com.docker.compose.service"]] | map({url: ("http://" + . + ":" + ($item["traefik.http.services.\($item["com.docker.compose.service"]).loadbalancer.server.port"] // "80"))}))
+          (split_ips[$item["com.docker.compose.service"]] | map({url: ("http://" + . + ":" + ($item["traefik.http.services.\($item["com.docker.compose.service"]).loadbalancer.server.port"] // "80"))})) |
+      
+        (extract_health_check($item) as $hc |
+          if $hc then
+            .http.services[$item["com.docker.compose.service"]].loadBalancer += { healthCheck: $hc }
+          else
+            .
+          end
+        )
+
+
       else . end
     )' | yq -P > $TRAEFIK_CONF_FILE
   echo "==> Traefik configuration generated successfully."
