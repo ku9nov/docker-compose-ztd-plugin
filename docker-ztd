@@ -1,0 +1,317 @@
+#!/bin/bash
+
+HEALTHCHECK_TIMEOUT=60
+NO_HEALTHCHECK_TIMEOUT=10
+WAIT_AFTER_HEALTHY_DELAY=0
+TRAEFIK_CONF_FILE="traefik/dynamic_conf.yml"
+PROXY_TYPE="traefik"
+
+if [ "$1" = "docker-cli-plugin-metadata" ]; then
+  cat <<EOF
+{
+  "SchemaVersion": "0.1.0",
+  "Vendor": "Serhii Kuianov",
+  "Version": "v0.1",
+  "ShortDescription": "Docker plugin for docker-compose update with real zero time deployment."
+}
+EOF
+  exit
+fi
+
+# Save docker arguments, i.e. arguments before "ztd"
+while [ $# -gt 0 ]; do
+  if [ "$1" = "ztd" ]; then
+    shift
+    break
+  fi
+
+  DOCKER_ARGS="$DOCKER_ARGS $1"
+  shift
+done
+
+# Check if compose v2 is available
+if docker compose >/dev/null 2>&1; then
+  COMPOSE_COMMAND="docker $DOCKER_ARGS compose"
+elif docker-compose >/dev/null 2>&1; then
+  COMPOSE_COMMAND="docker-compose"
+else
+  echo "docker compose or docker-compose is required"
+  exit 1
+fi
+usage() {
+  cat <<EOF
+
+Usage: docker ztd [OPTIONS] SERVICE
+
+Rolling new Compose service version.
+
+Options:
+  -h, --help                  Print usage
+  -f, --file FILE             Compose configuration files
+  -t, --timeout N             Healthcheck timeout (default: $HEALTHCHECK_TIMEOUT seconds)
+  -w, --wait N                When no healthcheck is defined, wait for N seconds
+                              before stopping old container (default: $NO_HEALTHCHECK_TIMEOUT seconds)
+      --wait-after-healthy N  When healthcheck is defined and succeeds, wait for additional N seconds
+                              before stopping the old container (default: 0 seconds)
+      --env-file FILE         Specify an alternate environment file
+      --proxy TYPE            Set proxy type (default: traefik, options: traefik, nginx-proxy)
+      --traefik-conf FILE     Specify Traefik configuration file (default: $TRAEFIK_CONF_FILE)
+
+EOF
+}
+
+exit_with_usage() {
+  usage
+  exit 1
+}
+
+healthcheck() {
+  docker $DOCKER_ARGS inspect --format='{{json .State.Health.Status}}' "$1" | grep -v "unhealthy" | grep -q "healthy"
+}
+
+scale() {
+  $COMPOSE_COMMAND $COMPOSE_FILES $ENV_FILES up --detach --scale "$1=$2" --no-recreate "$1"
+}
+
+update_traefik_conf() {
+  SERVICE=$1
+  OLD_CONTAINER_IDS=$2
+  NEW_CONTAINER_IDS=$3
+
+  echo "==> Updating Traefik config for service: $SERVICE"
+
+  # Get IPs of the old containers
+  OLD_IPS=$(for CONTAINER in $OLD_CONTAINER_IDS; do
+    docker inspect --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$CONTAINER"
+  done)
+
+  # Get IPs of the new containers
+  NEW_IPS=$(for CONTAINER in $NEW_CONTAINER_IDS; do
+    docker inspect --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$CONTAINER"
+  done)
+
+  echo "==> Old IPs for containers: $OLD_IPS"
+  echo "==> New IPs for containers: $NEW_IPS"
+
+
+  # Loop through old and new IP pairs
+  OLD_IPS_ARRAY=($OLD_IPS)
+  NEW_IPS_ARRAY=($NEW_IPS)
+
+  for i in "${!OLD_IPS_ARRAY[@]}"; do
+    OLD_IP="${OLD_IPS_ARRAY[$i]}"
+    NEW_IP="${NEW_IPS_ARRAY[$i]}"
+
+    echo "==> Replacing IP $OLD_IP with $NEW_IP in Traefik config"
+
+    # Use sed to replace the old IP with the new IP in the config file
+    sed -i '' "s|$OLD_IP|$NEW_IP|g" "$TRAEFIK_CONF_FILE"
+  done
+
+  echo "==> Updated Traefik config written back to $TRAEFIK_CONF_FILE"
+}
+
+generate_traefik_conf() {
+  echo "==> Start traefik config generation. Fetching services from the compose file."
+  COMPOSE_FILES_CLEANED=$(echo "$COMPOSE_FILES" | sed 's/^[[:space:]]*\-f[[:space:]]*//')
+  # Get the list of services (excluding those that match the 'proxy' pattern)
+  services=$(yq eval '.services | keys | map(select(test("proxy") | not)) | .[]' "$COMPOSE_FILES_CLEANED")
+
+  # Initialize the variable to store service IPs
+  service_ips=""
+
+  # Loop over each service
+  for service in $services; do
+    # Get the container IDs for the current service
+    container_ids=$(docker compose -f "$COMPOSE_FILES_CLEANED" ps -q "$service")
+
+    # Loop over each container ID
+    for container_id in $container_ids; do
+      # Get the IP address of the container
+      container_ip=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$container_id")
+      if [ -n "$container_ip" ]; then
+        # Append the service and its IP to the service_ips variable
+        service_ips="${service_ips}${service}:${container_ip} "
+      fi
+    done
+  done
+
+  # Check if the service_ips variable is empty (no IPs found)
+  if [ -z "$service_ips" ]; then
+    echo "Error: The list of IP addresses is empty!"
+    exit 1
+  fi
+
+  # Get the container labels and process them to create a Traefik configuration
+  docker ps -q | xargs -I {} docker inspect --format '{{json .Config.Labels}}' {} | jq -s --arg service_ips "$service_ips" '
+    def split_ips:
+      reduce ($service_ips | split(" "))[] as $item ({}; 
+        if ($item | contains(":")) then
+          . + { ($item | split(":")[0]): (.[$item | split(":")[0]] + [ $item | split(":")[1] ] // []) }
+        else . end
+      );
+
+    reduce .[] as $item ({}; 
+      if ($item["com.docker.compose.service"] | in(split_ips)) then
+        .http.routers[$item["com.docker.compose.service"]].rule = $item["traefik.http.routers.\($item["com.docker.compose.service"]).rule"] // null |
+        .http.routers[$item["com.docker.compose.service"]].service = $item["com.docker.compose.service"] |
+        .http.services[$item["com.docker.compose.service"]].loadBalancer.servers = 
+          (split_ips[$item["com.docker.compose.service"]] | map({url: ("http://" + . + ":" + ($item["traefik.http.services.\($item["com.docker.compose.service"]).loadbalancer.server.port"] // "80"))}))
+      else . end
+    )' | yq -P > $TRAEFIK_CONF_FILE
+  echo "==> Traefik configuration generated successfully."
+}
+
+
+
+
+main() {
+  if [ "$SERVICE" = "up" ] || [ "$SERVICE" = "up -d" ]; then
+    echo "==> Bringing up services."
+    $COMPOSE_COMMAND $COMPOSE_FILES $ENV_FILES $SERVICE & sleep 5; generate_traefik_conf
+    if [ "$SERVICE" = "up" ]; then
+      $COMPOSE_COMMAND $COMPOSE_FILES logs --follow --tail=1
+    fi
+    exit 0
+  fi
+  if [ -z "$($COMPOSE_COMMAND $COMPOSE_FILES $ENV_FILES ps --quiet "$SERVICE")" ]; then
+    echo "==> Service '$SERVICE' is not running. Starting the service."
+    $COMPOSE_COMMAND $COMPOSE_FILES $ENV_FILES up --detach --no-recreate "$SERVICE"
+    exit 0
+  fi
+
+  OLD_CONTAINER_IDS_STRING=$($COMPOSE_COMMAND $COMPOSE_FILES $ENV_FILES ps --quiet "$SERVICE" | tr '\n' '|' | sed 's/|$//')
+  OLD_CONTAINER_IDS=$(echo "$OLD_CONTAINER_IDS_STRING" | tr '|' ' ')
+  SCALE=$(echo "$OLD_CONTAINER_IDS" | wc -w | tr -d ' ')
+  SCALE_TIMES_TWO=$((SCALE * 2))
+  echo "==> Scaling '$SERVICE' to '$SCALE_TIMES_TWO' instances"
+  scale "$SERVICE" $SCALE_TIMES_TWO
+
+  NEW_CONTAINER_IDS=$($COMPOSE_COMMAND $COMPOSE_FILES $ENV_FILES ps --quiet "$SERVICE" | grep -Ev "$OLD_CONTAINER_IDS_STRING" | tr '\n' ' ')
+
+  if docker $DOCKER_ARGS inspect --format='{{json .State.Health}}' "$(echo $OLD_CONTAINER_IDS | cut -d\  -f 1)" | grep -q "Status"; then
+    echo "==> Waiting for new containers to be healthy (timeout: $HEALTHCHECK_TIMEOUT seconds)"
+    for _ in $(seq 1 "$HEALTHCHECK_TIMEOUT"); do
+      SUCCESS=0
+
+      for NEW_CONTAINER_ID in $NEW_CONTAINER_IDS; do
+        if healthcheck "$NEW_CONTAINER_ID"; then
+          SUCCESS=$((SUCCESS + 1))
+        fi
+      done
+
+      if [ "$SUCCESS" = "$SCALE" ]; then
+        break
+      fi
+
+      sleep 1
+    done
+
+    SUCCESS=0
+
+    for NEW_CONTAINER_ID in $NEW_CONTAINER_IDS; do
+      if healthcheck "$NEW_CONTAINER_ID"; then
+        SUCCESS=$((SUCCESS + 1))
+      fi
+    done
+
+    if [ "$SUCCESS" != "$SCALE" ]; then
+      echo "==> New containers are not healthy. Rolling back." >&2
+      docker $DOCKER_ARGS stop $NEW_CONTAINER_IDS
+      docker $DOCKER_ARGS rm $NEW_CONTAINER_IDS
+      exit 1
+    fi
+
+    if [ "$WAIT_AFTER_HEALTHY_DELAY" != "0" ]; then
+      echo "==> Waiting for healthy containers to settle down ($WAIT_AFTER_HEALTHY_DELAY seconds)"
+      sleep $WAIT_AFTER_HEALTHY_DELAY
+    fi
+  else
+    echo "==> Waiting for new containers to be ready ($NO_HEALTHCHECK_TIMEOUT seconds)"
+    sleep "$NO_HEALTHCHECK_TIMEOUT"
+  fi
+
+  # Update the Traefik config with new IPs
+  if [ "$PROXY_TYPE" = "traefik" ]; then
+    update_traefik_conf "$SERVICE" "$OLD_CONTAINER_IDS" "$NEW_CONTAINER_IDS"
+  elif [ "$PROXY_TYPE" = "nginx-proxy" ]; then
+    echo "==> nginx-proxy support not implemented yet."
+    exit 1
+  else
+    echo "==> Unknown proxy type: $PROXY_TYPE"
+    exit 1
+  fi
+  echo "==> Sleeping $NO_HEALTHCHECK_TIMEOUT second, after that, stopping and removing old containers"
+  sleep $NO_HEALTHCHECK_TIMEOUT
+  docker $DOCKER_ARGS stop $OLD_CONTAINER_IDS
+  docker $DOCKER_ARGS rm $OLD_CONTAINER_IDS
+}
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+  --proxy)
+    PROXY_TYPE="$2"
+    shift 2
+    ;;
+  --traefik-conf)
+    TRAEFIK_CONF_FILE="$2"
+    shift 2
+    ;;
+  -h | --help)
+    usage
+    exit 0
+    ;;
+  -f | --file)
+    COMPOSE_FILES="$COMPOSE_FILES -f $2"
+    shift 2
+    ;;
+  --env-file)
+    ENV_FILES="$ENV_FILES --env-file $2"
+    shift 2
+    ;;
+  -t | --timeout)
+    HEALTHCHECK_TIMEOUT="$2"
+    shift 2
+    ;;
+  -w | --wait)
+    NO_HEALTHCHECK_TIMEOUT="$2"
+    shift 2
+    ;;
+  --wait-after-healthy)
+    WAIT_AFTER_HEALTHY_DELAY="$2"
+    shift 2
+    ;;
+  -d)
+    if [ "$SERVICE" = "up" ]; then
+      SERVICE="up -d"
+    else
+      echo "Unknown option: -d"
+      exit_with_usage
+    fi
+    shift
+    ;;
+  -*)
+    echo "Unknown option: $1"
+    exit_with_usage
+    ;;
+  *)
+    if [ -n "$SERVICE" ]; then
+      echo "SERVICE is already set to '$SERVICE'"
+      if [ "$SERVICE" != "$1" ]; then
+        exit_with_usage
+      fi
+    fi
+
+    SERVICE="$1"
+    shift
+    ;;
+  esac
+done
+
+# Require SERVICE argument
+if [ -z "$SERVICE" ]; then
+  echo "SERVICE is missing"
+  exit_with_usage
+fi
+
+main
