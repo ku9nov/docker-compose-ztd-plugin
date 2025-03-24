@@ -75,28 +75,27 @@ scale() {
 
 update_traefik_conf() {
   SERVICE=$1
-  OLD_CONTAINER_IDS=$2
-  NEW_CONTAINER_IDS=$3
+  OLD_CONTAINERS_IDS=($2)
+  NEW_CONTAINERS_IDS=($3)
 
   echo "==> Updating Traefik config for service: $SERVICE"
 
   # Get IPs of the old containers
-  OLD_IPS=$(for CONTAINER in $OLD_CONTAINER_IDS; do
-    docker inspect --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$CONTAINER"
-  done)
+  echo "==> Old IPs for containers: ${OLD_CONTAINERS_IDS[@]}"
+  OLD_IPS_ARRAY=()
+  for id in "${OLD_CONTAINERS_IDS[@]}"; do
+    OLD_IPS_ARRAY+=("${id:0:12}")
+  done
 
   # Get IPs of the new containers
-  NEW_IPS=$(for CONTAINER in $NEW_CONTAINER_IDS; do
-    docker inspect --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$CONTAINER"
-  done)
+  echo "==> New IPs for containers: ${NEW_CONTAINERS_IDS[@]}"
+  NEW_IPS_ARRAY=()
+  for id in "${NEW_CONTAINERS_IDS[@]}"; do
+    NEW_IPS_ARRAY+=("${id:0:12}")
+  done
 
-  echo "==> Old IPs for containers: $OLD_IPS"
-  echo "==> New IPs for containers: $NEW_IPS"
-
-
-  # Loop through old and new IP pairs
-  OLD_IPS_ARRAY=($OLD_IPS)
-  NEW_IPS_ARRAY=($NEW_IPS)
+  echo "==> Processed Old Container IDs: ${OLD_IPS_ARRAY[@]}"
+  echo "==> Processed New Container IDs: ${NEW_IPS_ARRAY[@]}"
 
   for i in "${!OLD_IPS_ARRAY[@]}"; do
     OLD_IP="${OLD_IPS_ARRAY[$i]}"
@@ -295,6 +294,7 @@ main() {
   fi
   echo "==> Sleeping $NO_HEALTHCHECK_TIMEOUT second, after that, stopping and removing old containers"
   sleep $NO_HEALTHCHECK_TIMEOUT
+  echo "==> These containers $OLD_CONTAINER_IDS will be stopped and removed"
   docker $DOCKER_ARGS stop $OLD_CONTAINER_IDS
   docker $DOCKER_ARGS rm $OLD_CONTAINER_IDS
 }
