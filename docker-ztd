@@ -123,12 +123,12 @@ generate_traefik_conf() {
   # Loop over each service
   for service in $services; do
     # Get the container IDs for the current service
-    container_ids=$(docker compose -f "$COMPOSE_FILES_CLEANED" ps -q "$service")
+    container_ids=$(docker compose -f "$COMPOSE_FILES_CLEANED" ps -q "$service" | cut -c1-12)
 
     # Loop over each container ID
     for container_id in $container_ids; do
       # Get the IP address of the container
-      container_ip=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$container_id")
+      container_ip=$container_id
       if [ -n "$container_ip" ]; then
         # Append the service and its IP to the service_ips variable
         service_ips="${service_ips}${service}:${container_ip} "
