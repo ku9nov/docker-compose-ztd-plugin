@@ -1,24 +1,108 @@
-<h1 align="center">
-<code>docker ztd</code><br>
-Zero Downtime Deployment for Docker Compose
-</h1>
+# <code>docker ztd</code> 🚀
+## Zero Downtime Deployment for Docker Compose
 
-#### inspired by [`docker-rollout`](https://github.com/wowu/docker-rollout)
+`docker ztd` is a CLI plugin for Docker that allows updating Docker Compose services without downtime using dynamic Traefik configurations.
 
-Docker CLI plugin that updates Docker Compose services without downtime using traefik dynamic configurations.
+### Why is this important? 🤔
+Updating services in production without downtime is crucial for high-load applications. Instead of using `docker compose up -d <service>`, which can cause downtime, `docker ztd`:
+- **Scales** the service to double the number of containers ✅
+- **Waits** for the new containers to be ready 🕐
+- **Removes** old containers without traffic loss 🔄
 
-Simply replace `docker compose up -d <service>` with `docker ztd <service>` in your deployment scripts. This command will scale the service to twice the current number of instances, wait for the new containers to be ready, and then remove the old containers.
-
-## Installation
+## 📥 Installation
 
 ```bash
 curl -fsSL https://gist.githubusercontent.com/ku9nov/f76d2b7f65fa266a17c89e0a50880479/raw/9182ae94d16bea270a4228dd17be16f05e156041/install-docker-ztd.sh | bash
 ```
 
-## Usage
+## 🛠 Usage
 
-Run `docker ztd <name>` instead of `docker compose up -d <name>` to update a service without downtime. If you have both `docker compose` plugin and `docker-compose` command available, docker-ztd will use `docker compose` by default.
+Simply replace `docker compose up -d <service>` with `docker ztd <service>`.
 
 ```bash
 docker ztd -f docker-compose.yml <service-name>
 ```
+
+Or start all services:
+
+```bash
+# It is recommended to use this only once to prevent uncontrolled container recreation, for example, due to label updates. All service updates should be performed exclusively using "docker ztd <service-name>".
+docker ztd -f docker-compose.yml up -d
+```
+
+## 🔧 Adding Traefik to `docker-compose.yml`
+To ensure `docker ztd` works correctly, configure `traefik`:
+
+```yaml
+services:
+  traefik-proxy:
+    image: traefik:v3.3.4
+    command:
+      - --api.insecure=true
+      - --entrypoints.web.address=:80
+      - --providers.file.directory=/etc/traefik # it's important to use a directory due to a Traefik bug
+      - --providers.file.watch=true
+    restart: unless-stopped
+    ports:
+      - "8000:80"
+      - "8080:8080"
+    volumes:
+      - ./traefik:/etc/traefik:ro
+    networks:
+      - traefik
+
+networks:
+  traefik:
+    driver: bridge
+```
+
+## 📌 Adding Traefik Labels for Services
+For each service that needs to be updated without downtime, add the standard Traefik labels:
+
+```yaml
+services:
+  helloworld-front:
+    image: <image>
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.helloworld-front.entrypoints=web" # required
+      - "traefik.http.routers.helloworld-front.rule=Host(`frontend.example.com`)" # required
+      - "traefik.http.services.helloworld-front.loadbalancer.server.port=80" # required
+```
+
+## 🎯 How Does It Work?
+
+Zero Downtime Deployment is achieved through **automatic generation of dynamic configurations** for Traefik. By default, this file is stored at:
+
+```bash
+traefik/dynamic_conf.yml
+```
+
+## 🔗 Links
+📂 Example configuration repository: [docker-compose-deployments-examples](https://github.com/ku9nov/docker-compose-deployments-examples)
+
+## ⚠️ Limitations
+The `docker ztd` plugin **does not support full configuration generation** for all Traefik parameters, only a specific subset:
+
+- `traefik.enable`
+- `traefik.http.routers.<name>.entrypoints`
+- `traefik.http.routers.<name>.rule`
+- `traefik.http.services.<name>.loadbalancer.server.port`
+- `traefik.http.services.<name>.loadbalancer.healthCheck.path` 
+- `traefik.http.services.<name>.loadbalancer.healthCheck.interval`
+- `traefik.http.services.<name>.loadbalancer.healthCheck.timeout`
+- `traefik.http.services.<name>.loadbalancer.healthCheck.scheme`
+- `traefik.http.services.<name>.loadbalancer.healthCheck.mode`
+- `traefik.http.services.<name>.loadbalancer.healthCheck.hostname`
+- `traefik.http.services.<name>.loadbalancer.healthCheck.port`
+- `traefik.http.services.<name>.loadbalancer.healthCheck.headers.My-Custom-Header`
+- `traefik.http.services.<name>.loadbalancer.healthCheck.followRedirects`
+- `traefik.http.services.<name>.loadbalancer.healthCheck.method`
+- `traefik.http.services.<name>.loadbalancer.healthCheck.status`
+
+## 🛣 Roadmap 🏗
+- [ ] Add support for `nginx-proxy` 🔜
+- [ ] Implement **blue-green** and **canary deployments** 🎯
+
+🚀 Use `docker ztd` to update services without downtime and improve production reliability! 😎
+

@@ -209,7 +209,9 @@ generate_traefik_conf() {
 
 
       else . end
-    )' | yq -P > $TRAEFIK_CONF_FILE
+    )' | yq -P > dynamic.tmp
+    # Using file replacement instead of the bash > operator helps avoid downtime in some cases.
+    mv dynamic.tmp $TRAEFIK_CONF_FILE 
   echo "==> Traefik configuration generated successfully."
 }
 
@@ -217,6 +219,7 @@ generate_traefik_conf() {
 
 
 main() {
+  # It is recommended to use this only once to prevent uncontrolled container recreation, for example, due to label updates. All service updates should be performed exclusively using "docker ztd <service-name>".
   if [ "$SERVICE" = "up" ] || [ "$SERVICE" = "up -d" ]; then
     echo "==> Bringing up services."
     $COMPOSE_COMMAND $COMPOSE_FILES $ENV_FILES $SERVICE & sleep 5; generate_traefik_conf
@@ -297,6 +300,8 @@ main() {
   echo "==> These containers $OLD_CONTAINER_IDS will be stopped and removed"
   docker $DOCKER_ARGS stop $OLD_CONTAINER_IDS
   docker $DOCKER_ARGS rm $OLD_CONTAINER_IDS
+  # Added for regenerating the configuration without downtime, for example, when updating labels or other configurations.
+  generate_traefik_conf
 }
 
 while [ $# -gt 0 ]; do
