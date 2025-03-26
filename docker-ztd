@@ -9,9 +9,9 @@ PROXY_TYPE="traefik"
 if [ "$1" = "docker-cli-plugin-metadata" ]; then
   cat <<EOF
 {
-  "SchemaVersion": "0.1.0",
+  "SchemaVersion": "0.2.0",
   "Vendor": "Serhii Kuianov",
-  "Version": "v0.1",
+  "Version": "v0.2",
   "ShortDescription": "Docker plugin for docker-compose update with real zero time deployment."
 }
 EOF
@@ -73,6 +73,16 @@ scale() {
   $COMPOSE_COMMAND $COMPOSE_FILES $ENV_FILES up --detach --scale "$1=$2" --no-recreate "$1"
 }
 
+detect_os() {
+    case "$(uname -s)" in
+        Linux*)  echo "Linux" ;;
+        Darwin*) echo "macOS" ;;
+        *)       echo "Unknown OS" ;;
+    esac
+}
+
+OS_TYPE=$(detect_os)
+
 update_traefik_conf() {
   SERVICE=$1
   OLD_CONTAINERS_IDS=($2)
@@ -104,7 +114,14 @@ update_traefik_conf() {
     echo "==> Replacing IP $OLD_IP with $NEW_IP in Traefik config"
 
     # Use sed to replace the old IP with the new IP in the config file
-    sed -i '' "s|$OLD_IP|$NEW_IP|g" "$TRAEFIK_CONF_FILE"
+    if [ "$OS_TYPE" = "macOS" ]; then
+        sed -i '' "s|$OLD_IP|$NEW_IP|g" "$TRAEFIK_CONF_FILE"
+    elif [ "$OS_TYPE" = "Linux" ]; then
+        sed -i "s|$OLD_IP|$NEW_IP|g" "$TRAEFIK_CONF_FILE"
+    else
+        echo "Unsupported OS"
+        exit 1
+    fi
   done
 
   echo "==> Updated Traefik config written back to $TRAEFIK_CONF_FILE"
@@ -122,7 +139,7 @@ generate_traefik_conf() {
   # Loop over each service
   for service in $services; do
     # Get the container IDs for the current service
-    container_ids=$(docker compose -f "$COMPOSE_FILES_CLEANED" ps -q "$service" | cut -c1-12)
+    container_ids=$($COMPOSE_COMMAND -f "$COMPOSE_FILES_CLEANED" ps -q "$service" | cut -c1-12)
 
     # Loop over each container ID
     for container_id in $container_ids; do
@@ -142,7 +159,7 @@ generate_traefik_conf() {
   fi
 
   # Get the container labels and process them to create a Traefik configuration
-  docker ps -q | xargs -I {} docker inspect --format '{{json .Config.Labels}}' {} | jq -s --arg service_ips "$service_ips" '
+  $COMPOSE_COMMAND $COMPOSE_FILES $ENV_FILES ps --quiet | xargs -I {} docker inspect --format '{{json .Config.Labels}}' {} | jq -s --arg service_ips "$service_ips" '
     def split_ips:
       reduce ($service_ips | split(" "))[] as $item ({}; 
         if ($item | contains(":")) then
@@ -209,7 +226,10 @@ generate_traefik_conf() {
 
 
       else . end
-    )' | yq -P > dynamic.tmp
+    )' > dynamic.json
+    # Using additional json file here help script to work with old yq jq
+    cat dynamic.json | yq eval -P > dynamic.tmp
+    rm -f dynamic.json
     # Using file replacement instead of the bash > operator helps avoid downtime in some cases.
     mv dynamic.tmp $TRAEFIK_CONF_FILE 
   echo "==> Traefik configuration generated successfully."

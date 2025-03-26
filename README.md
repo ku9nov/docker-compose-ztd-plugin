@@ -15,7 +15,21 @@ Updating services in production without downtime is crucial for high-load applic
 curl -fsSL https://gist.githubusercontent.com/ku9nov/f76d2b7f65fa266a17c89e0a50880479/raw/9182ae94d16bea270a4228dd17be16f05e156041/install-docker-ztd.sh | bash
 ```
 
+### Dependencies
+
+You should have installed `jq` and `yq` on your server.
+
+Depends on how Docker is installed. In some systems, you may need to create the Traefik folder manually.
+
+```bash
+mkdir -p traefik
+chown -R $(id -u):$(id -g) traefik
+chmod -R 755 traefik
+```
+
 ## 🛠 Usage
+
+:warning: Your service cannot have `container_name` and `ports` defined in `docker-compose.yml`, as it's not possible to run multiple containers with the same name or port mapping.
 
 Simply replace `docker compose up -d <service>` with `docker ztd <service>`.
 
