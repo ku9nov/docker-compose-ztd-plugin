@@ -9,7 +9,7 @@ PROXY_TYPE="traefik"
 if [ "$1" = "docker-cli-plugin-metadata" ]; then
   cat <<EOF
 {
-  "SchemaVersion": "0.2.0",
+  "SchemaVersion": "0.1.0",
   "Vendor": "Serhii Kuianov",
   "Version": "v0.2",
   "ShortDescription": "Docker plugin for docker-compose update with real zero time deployment."
@@ -30,9 +30,9 @@ while [ $# -gt 0 ]; do
 done
 
 # Check if compose v2 is available
-if docker compose >/dev/null 2>&1; then
+if docker compose version >/dev/null 2>&1; then
   COMPOSE_COMMAND="docker $DOCKER_ARGS compose"
-elif docker-compose >/dev/null 2>&1; then
+elif docker-compose version >/dev/null 2>&1; then
   COMPOSE_COMMAND="docker-compose"
 else
   echo "docker compose or docker-compose is required"
