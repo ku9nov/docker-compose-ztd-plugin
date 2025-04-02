@@ -11,7 +11,7 @@ if [ "$1" = "docker-cli-plugin-metadata" ]; then
 {
   "SchemaVersion": "0.1.0",
   "Vendor": "Serhii Kuianov",
-  "Version": "v0.2",
+  "Version": "v0.3",
   "ShortDescription": "Docker plugin for docker-compose update with real zero time deployment."
 }
 EOF
@@ -131,7 +131,7 @@ generate_traefik_conf() {
   echo "==> Start traefik config generation. Fetching services from the compose file."
   COMPOSE_FILES_CLEANED=$(echo "$COMPOSE_FILES" | sed 's/^[[:space:]]*\-f[[:space:]]*//')
   # Get the list of services (excluding those that match the 'proxy' pattern)
-  services=$(yq eval '.services | keys | map(select(test("proxy") | not)) | .[]' "$COMPOSE_FILES_CLEANED")
+  services=$(yq eval '.services | to_entries | map(select(.value.labels[]? == "traefik.enable=true")) | .[].key' "$COMPOSE_FILES_CLEANED")
 
   # Initialize the variable to store service IPs
   service_ips=""
