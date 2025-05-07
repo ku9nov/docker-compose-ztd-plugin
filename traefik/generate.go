@@ -64,7 +64,7 @@ func EnsureTraefikDir(log *logrus.Logger) error {
 
 	// Check if directory exists
 	if _, err := os.Stat(traefikDir); os.IsNotExist(err) {
-		log.Infof("Creating Traefik directory: %s", traefikDir)
+		log.Debugf("Creating Traefik directory: %s", traefikDir)
 
 		// Create directory
 		if err := os.MkdirAll(traefikDir, 0755); err != nil {
@@ -154,11 +154,11 @@ func GenerateConfig(log *logrus.Logger, containers []container.Summary, serviceI
 
 		// Use the first container to get service configuration
 		container := serviceContainers[0]
-		log.Infof("Processing service: %s", serviceName)
+		log.Debugf("Processing service: %s", serviceName)
 
 		// Check if service has Traefik enabled
 		if container.Labels["traefik.enable"] != "true" {
-			log.Infof("Skipping service %s (Traefik not enabled)", serviceName)
+			log.Debugf("Skipping service %s (Traefik not enabled)", serviceName)
 			continue
 		}
 
@@ -170,7 +170,7 @@ func GenerateConfig(log *logrus.Logger, containers []container.Summary, serviceI
 			continue
 		}
 
-		log.Infof("Found router rule for %s: %s", serviceName, rule)
+		log.Debugf("Found router rule for %s: %s", serviceName, rule)
 
 		// Get server port
 		portKey := fmt.Sprintf("traefik.http.services.%s.loadbalancer.server.port", serviceName)
@@ -184,7 +184,7 @@ func GenerateConfig(log *logrus.Logger, containers []container.Summary, serviceI
 		for _, c := range serviceContainers {
 			serverURL := fmt.Sprintf("http://%s:%s", c.ID[:12], port)
 			servers = append(servers, Server{URL: serverURL})
-			log.Infof("Added server for %s: %s", serviceName, serverURL)
+			log.Debugf("Added server for %s: %s", serviceName, serverURL)
 		}
 
 		if len(servers) == 0 {
@@ -217,7 +217,7 @@ func GenerateConfig(log *logrus.Logger, containers []container.Summary, serviceI
 
 			if hasValues {
 				service.LoadBalancer.HealthCheck = healthCheck
-				log.Infof("Added health check for service %s", serviceName)
+				log.Debugf("Added health check for service %s", serviceName)
 			}
 		}
 
@@ -228,7 +228,7 @@ func GenerateConfig(log *logrus.Logger, containers []container.Summary, serviceI
 		}
 		config.HTTP.Services[serviceName] = service
 
-		log.Infof("Added configuration for service %s", serviceName)
+		log.Debugf("Added configuration for service %s", serviceName)
 	}
 
 	// Convert to YAML
@@ -242,7 +242,7 @@ func GenerateConfig(log *logrus.Logger, containers []container.Summary, serviceI
 		return fmt.Errorf("failed to write config file: %v", err)
 	}
 
-	log.Infof("Traefik configuration written to %s", configPath)
+	log.Debugf("Traefik configuration written to %s", configPath)
 	log.Info("Traefik configuration generation completed successfully")
 	return nil
 }
@@ -362,7 +362,7 @@ func UpdateConfig(log *logrus.Logger, oldContainers, newContainers []string, con
 			if newID, exists := containerMap[oldContainerID]; exists {
 				// Update the URL with new container ID
 				config.HTTP.Services[serviceName].LoadBalancer.Servers[i].URL = fmt.Sprintf("http://%s:%s", newID, hostPort[1])
-				log.Infof("Updated container ID for service %s: %s -> %s", serviceName, oldContainerID, newID)
+				log.Debugf("Updated container ID for service %s: %s -> %s", serviceName, oldContainerID, newID)
 			}
 		}
 	}

@@ -31,7 +31,7 @@ type Config struct {
 	ComposeFiles          []string
 	EnvFiles              []string
 	Service               string
-	Detach                bool
+	Verbose               bool
 }
 
 func main() {
@@ -49,6 +49,9 @@ func main() {
 
 	// Parse command line arguments
 	config := parseArgs(log)
+	if config.Verbose {
+		log.SetLevel(logrus.DebugLevel)
+	}
 
 	// Create Docker client
 	dockerClient, err := docker.NewDockerClient(log)
@@ -76,7 +79,6 @@ func main() {
 
 	// Check if service exists
 	containers, err := dockerClient.GetServiceContainers(ctx, config.Service, config.ComposeFiles, config.EnvFiles)
-	log.Infof("CONTAINERS: %v", containers)
 	if err != nil {
 		log.Fatalf("Failed to get service containers: %v", err)
 	}
@@ -97,7 +99,7 @@ func main() {
 	}
 
 	scale := len(containers) * 2
-	log.Infof("Scaling '%s' to '%d' instances", config.Service, scale)
+
 	newContainers, err := dockerClient.ScaleService(ctx, config.Service, scale, config.ComposeFiles, config.EnvFiles)
 	if err != nil {
 		log.Fatalf("Failed to scale service: %v", err)
@@ -119,8 +121,8 @@ func main() {
 	}
 	newContainers = filteredNewContainers
 
-	log.Infof("Old containers: %v", oldContainers)
-	log.Infof("New containers: %v", newContainers)
+	log.Debugf("Old containers: %v", oldContainers)
+	log.Debugf("New containers: %v", newContainers)
 	// Wait for new containers to be healthy
 	if err := dockerClient.WaitForHealthyContainers(ctx, newContainers, config.HealthcheckTimeout); err != nil {
 		log.Errorf("New containers are not healthy. Rolling back.")
@@ -181,6 +183,7 @@ Options:
   -f, --file FILE                Compose configuration files (can be specified multiple times)
   -e, --env-file FILE            Environment files (can be specified multiple times)
   -h, --help                     Show this help message
+  -v, --verbose                  Enable verbose output
 
 Examples:
   docker ztd --timeout 120 -f docker-compose.yml api
@@ -270,6 +273,9 @@ func parseArgs(log *logrus.Logger) *Config {
 			}
 			config.EnvFiles = append(config.EnvFiles, args[i+1])
 			i++
+
+		case arg == "--verbose" || arg == "-v":
+			config.Verbose = true
 
 		case strings.HasPrefix(arg, "-"):
 			log.Fatalf("Unknown flag: %s", arg)

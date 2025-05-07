@@ -87,14 +87,14 @@ func (d *DockerClient) WaitForHealthyContainers(ctx context.Context, containerID
 			if err != nil {
 				return fmt.Errorf("failed to check container health: %v", err)
 			}
-			d.log.Infof("Container %s is healthy: %t", containerID, healthy)
+			d.log.Debugf("Container %s is healthy: %t", containerID, healthy)
 			if !healthy {
 				allHealthy = false
 				break
 			}
 		}
 		if allHealthy {
-			d.log.Infof("All containers are healthy")
+			d.log.Debugf("All containers are healthy")
 			return nil
 		}
 		time.Sleep(time.Second)

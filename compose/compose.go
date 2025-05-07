@@ -168,7 +168,7 @@ func (c *ComposeClient) DeployService(ctx context.Context, serviceName string, d
 				}
 
 				if !containerInfo.State.Running {
-					c.log.Infof("Container %s is not running yet (State: %s)", container.ID[:12], containerInfo.State.Status)
+					c.log.Debugf("Container %s is not running yet (State: %s)", container.ID[:12], containerInfo.State.Status)
 					allRunning = false
 					break
 				}
@@ -180,7 +180,7 @@ func (c *ComposeClient) DeployService(ctx context.Context, serviceName string, d
 			}
 
 			if retry < maxRetries-1 {
-				c.log.Infof("Waiting for containers to be ready (attempt %d/%d)...", retry+1, maxRetries)
+				c.log.Debugf("Waiting for containers to be ready (attempt %d/%d)...", retry+1, maxRetries)
 				time.Sleep(retryInterval)
 			}
 		}
@@ -229,7 +229,7 @@ func (c *ComposeClient) DeployService(ctx context.Context, serviceName string, d
 		}
 	}
 
-	c.log.Infof("Found services in compose files: %v", composeServices)
+	c.log.Debugf("Found services in compose files: %v", composeServices)
 
 	// Check if service exists in compose files
 	serviceExists := false
@@ -257,11 +257,11 @@ func (c *ComposeClient) DeployService(ctx context.Context, serviceName string, d
 			return fmt.Errorf("failed to inspect container: %v", err)
 		}
 
-		c.log.Infof("Found existing container: %s (State: %s)", existingContainers[0][:12], containerInfo.State.Status)
+		c.log.Debugf("Found existing container: %s (State: %s)", existingContainers[0][:12], containerInfo.State.Status)
 
 		// Container exists, start it if stopped
 		if containerInfo.State.Status == "exited" || containerInfo.State.Status == "created" {
-			c.log.Infof("Starting existing container: %s", existingContainers[0][:12])
+			c.log.Debugf("Starting existing container: %s", existingContainers[0][:12])
 
 			if err := c.client.ContainerStart(ctx, existingContainers[0], container.StartOptions{}); err != nil {
 				return fmt.Errorf("failed to start container: %v", err)
@@ -272,7 +272,7 @@ func (c *ComposeClient) DeployService(ctx context.Context, serviceName string, d
 				return c.streamContainerLogs(ctx, existingContainers[0])
 			}
 		} else {
-			c.log.Infof("Container %s is already running", existingContainers[0][:12])
+			c.log.Debugf("Container %s is already running", existingContainers[0][:12])
 		}
 
 		// Generate Traefik configuration
@@ -284,7 +284,7 @@ func (c *ComposeClient) DeployService(ctx context.Context, serviceName string, d
 	}
 
 	// Container doesn't exist, create and start it
-	c.log.Infof("Creating new container for service: %s", serviceName)
+	c.log.Debugf("Creating new container for service: %s", serviceName)
 
 	// Build docker-compose command
 	args := []string{"compose"}
@@ -413,6 +413,6 @@ func (c *ComposeClient) GetServiceContainers(ctx context.Context, serviceName st
 		}
 	}
 
-	c.log.Infof("Found %d containers for service %s", len(serviceContainers), serviceName)
+	c.log.Debugf("Found %d containers for service %s", len(serviceContainers), serviceName)
 	return serviceContainers, nil
 }
