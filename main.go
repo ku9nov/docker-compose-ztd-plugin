@@ -15,13 +15,10 @@ import (
 
 // PluginMetadata represents the plugin metadata
 type PluginMetadata struct {
-	SchemaVersion    string   `json:"SchemaVersion"`
-	Vendor           string   `json:"Vendor"`
-	Version          string   `json:"Version"`
-	ShortDescription string   `json:"ShortDescription"`
-	URL              string   `json:"URL"`
-	Experimental     bool     `json:"Experimental"`
-	Commands         []string `json:"Commands"`
+	SchemaVersion    string `json:"SchemaVersion"`
+	Vendor           string `json:"Vendor"`
+	Version          string `json:"Version"`
+	ShortDescription string `json:"ShortDescription"`
 }
 
 // Config holds the configuration parameters
