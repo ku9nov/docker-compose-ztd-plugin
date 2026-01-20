@@ -11,7 +11,7 @@ if [ "$1" = "docker-cli-plugin-metadata" ]; then
 {
   "SchemaVersion": "0.1.0",
   "Vendor": "Serhii Kuianov",
-  "Version": "v0.3",
+  "Version": "v0.4",
   "ShortDescription": "Docker plugin for docker-compose update with real zero time deployment."
 }
 EOF
@@ -222,8 +222,20 @@ generate_traefik_conf() {
           else
             .
           end
-        )
+        ) |
 
+        ( . as $state | [ $item | keys[] | select(startswith("traefik.tcp.routers.")) | split(".") | .[3] ] | unique | reduce .[] as $tcp_name ($state;
+          ( ($item["traefik.tcp.routers.\($tcp_name).rule"] // "") as $tcp_rule
+          | ($item["traefik.tcp.routers.\($tcp_name).service"] // $tcp_name) as $tcp_svc
+          | ($item["traefik.tcp.services.\($tcp_svc).loadbalancer.server.port"] // "") as $tcp_port
+          | (($item["traefik.tcp.routers.\($tcp_name).entrypoints"] // "") | if . == "" then [] else split(",") | map(gsub("^\\s+";"") | gsub("\\s+$";"")) end) as $tcp_ep
+          | if $tcp_rule != "" and $tcp_port != "" then
+              .tcp.routers[$tcp_name] = ({ rule: $tcp_rule, service: $tcp_svc } + (if ($tcp_ep | length) > 0 then { entryPoints: $tcp_ep } else {} end)) |
+              .tcp.services[$tcp_svc].loadBalancer.servers = (split_ips[$item["com.docker.compose.service"]] | map({ address: (. + ":" + $tcp_port) }))
+            else .
+            end
+          )
+        ))
 
       else . end
     )' > dynamic.json

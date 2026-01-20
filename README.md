@@ -56,10 +56,14 @@ services:
       - --entrypoints.web.address=:80
       - --providers.file.directory=/etc/traefik # it's important to use a directory due to a Traefik bug
       - --providers.file.watch=true
+      # XMPP TCP EXAMPLE
+      - --entrypoints.xmpp.address=:5222
     restart: unless-stopped
     ports:
       - "8000:80"
       - "8080:8080"
+      # XMPP TCP EXAMPLE
+      - "5222:5222"
     volumes:
       - ./traefik:/etc/traefik:ro
     networks:
@@ -82,6 +86,10 @@ services:
       - "traefik.http.routers.helloworld-front.entrypoints=web" # required
       - "traefik.http.routers.helloworld-front.rule=Host(`frontend.example.com`)" # required
       - "traefik.http.services.helloworld-front.loadbalancer.server.port=80" # required
+      # XMPP TCP EXAMPLE
+      - traefik.tcp.routers.example-xmpp.rule=HostSNI(`*`)
+      - traefik.tcp.routers.example-xmpp.entrypoints=xmpp
+      - traefik.tcp.services.example-xmpp.loadbalancer.server.port=5222
 ```
 
 ## 🎯 How Does It Work?
@@ -113,6 +121,9 @@ The `docker ztd` plugin **does not support full configuration generation** for a
 - `traefik.http.services.<name>.loadbalancer.healthCheck.followRedirects`
 - `traefik.http.services.<name>.loadbalancer.healthCheck.method`
 - `traefik.http.services.<name>.loadbalancer.healthCheck.status`
+- `traefik.tcp.routers.<name>.rule`
+- `traefik.tcp.routers.<name>.entrypoints`
+- `traefik.tcp.services.<name>.loadbalancer.server.port`
 
 ## 🛣 Roadmap 🏗
 - [ ] Add support for `nginx-proxy` 🔜
