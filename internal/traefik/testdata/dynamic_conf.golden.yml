@@ -1,0 +1,28 @@
+http:
+  routers:
+    example:
+      rule: Host(`example.com`) && PathPrefix(`/`)
+      service: example
+  services:
+    example:
+      loadBalancer:
+        servers:
+          - url: http://abcdef123456:9001
+          - url: http://fedcba654321:9001
+        healthCheck:
+          path: /health
+          interval: 10s
+          timeout: 1s
+tcp:
+  routers:
+    example-xmpp:
+      rule: HostSNI(`*`)
+      service: example-xmpp
+      entryPoints:
+        - xmpp
+  services:
+    example-xmpp:
+      loadBalancer:
+        servers:
+          - address: abcdef123456:5222
+          - address: fedcba654321:5222

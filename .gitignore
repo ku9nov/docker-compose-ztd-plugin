@@ -1,2 +1,4 @@
 docker-compose.yml
 traefik/dynamic_conf.yml
+.DS_Store
+docker-ztd-go

@@ -1,0 +1,5 @@
+services:
+  example:
+    image: node:22-alpine
+    labels:
+      - "traefik.enable=true"
