@@ -11,8 +11,34 @@ Zero-downtime rollout plugin for Docker Compose.
 - switch Traefik dynamic config to new container IDs
 - remove old containers after a drain wait
 
+You can use either implementation:
 
-## Build and Install
+- Bash implementation (legacy, simple setup for some environments)
+- Go implementation (new modular implementation)
+
+## Installation
+
+### Bash implementation
+
+```bash
+curl -fsSL https://gist.githubusercontent.com/ku9nov/f76d2b7f65fa266a17c89e0a50880479/raw/9182ae94d16bea270a4228dd17be16f05e156041/install-docker-ztd.sh | bash
+```
+
+#### Bash dependencies
+
+You should have `jq` and `yq` installed on your server.
+
+When using the bash-based installation, you may need to create the Traefik folder manually depending on your Docker setup:
+
+```bash
+mkdir -p traefik
+chown -R $(id -u):$(id -g) traefik
+chmod -R 755 traefik
+```
+
+### Go implementation
+
+There is no auto-install script for Go yet. Build and install manually:
 
 ```bash
 go build -o docker-ztd-go ./cmd/docker-ztd
@@ -20,6 +46,8 @@ mkdir -p ~/.docker/cli-plugins
 cp docker-ztd-go ~/.docker/cli-plugins/docker-ztd
 chmod +x ~/.docker/cli-plugins/docker-ztd
 ```
+
+Go implementation advantage: no runtime dependency on `jq` or `yq`.
 
 ## Runtime Dependencies
 
