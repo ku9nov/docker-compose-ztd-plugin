@@ -14,6 +14,7 @@ import (
 	"github.com/ku9nov/docker-compose-ztd-plugin/internal/compose"
 	"github.com/ku9nov/docker-compose-ztd-plugin/internal/docker"
 	"github.com/ku9nov/docker-compose-ztd-plugin/internal/rollout"
+	"github.com/ku9nov/docker-compose-ztd-plugin/internal/state"
 	"github.com/ku9nov/docker-compose-ztd-plugin/internal/traefik"
 )
 
@@ -33,6 +34,15 @@ func (r *Runner) Run(ctx context.Context, cfg cli.Config) error {
 
 	dockerClient := docker.NewClient(cfg.DockerArgs)
 	generator := traefik.NewGenerator(composeAdapter, dockerClient)
+	store := state.NewStore(state.DefaultStateDir)
+	bgDeployer := bluegreen.NewDeployer(r.log, composeAdapter, dockerClient, store)
+
+	cleanupWorker := state.NewCleanupWorker(store, func(ctx context.Context, project string, st state.DeploymentState) error {
+		return bgDeployer.CleanupProjectState(ctx, project, st, cfg.TraefikConfigFile)
+	})
+	if err := cleanupWorker.ProcessOverdue(ctx); err != nil {
+		r.log.WithError(err).Warn("==> Failed to process overdue blue-green cleanups")
+	}
 
 	if cfg.Service == "up" {
 		r.log.Info("==> Bringing up services.")
@@ -64,14 +74,21 @@ func (r *Runner) Run(ctx context.Context, cfg cli.Config) error {
 			TraefikConfigFile:    cfg.TraefikConfigFile,
 		})
 	case cli.StrategyBlueGreen:
-		return bluegreen.Run(ctx, r.log, bluegreen.Options{
-			Service:      cfg.Service,
-			ComposeFiles: cfg.ComposeFiles,
-			EnvFiles:     cfg.EnvFiles,
-			HostMode:     cfg.HostMode,
-			HeadersMode:  cfg.HeadersMode,
-			CookiesMode:  cfg.CookiesMode,
-			IPMode:       cfg.IPMode,
+		return bgDeployer.Run(ctx, bluegreen.Options{
+			Service:           cfg.Service,
+			Action:            cfg.Action,
+			SwitchTo:          cfg.SwitchTo,
+			ComposeFiles:      cfg.ComposeFiles,
+			EnvFiles:          cfg.EnvFiles,
+			TraefikConfigFile: cfg.TraefikConfigFile,
+			HostMode:          cfg.HostMode,
+			HeadersMode:       cfg.HeadersMode,
+			CookiesMode:       cfg.CookiesMode,
+			IPMode:            cfg.IPMode,
+			AutoCleanup:       cfg.AutoCleanup,
+			HealthTimeout:     cfg.HealthcheckTimeout,
+			NoHealthTimeout:   cfg.NoHealthcheckTimeout,
+			WaitAfterHealthy:  cfg.WaitAfterHealthy,
 		})
 	case cli.StrategyCanary:
 		return canary.Run(ctx, r.log, canary.Options{

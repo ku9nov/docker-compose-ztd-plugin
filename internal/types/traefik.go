@@ -11,8 +11,9 @@ type HTTPConfig struct {
 }
 
 type HTTPRouter struct {
-	Rule    string `yaml:"rule,omitempty"`
-	Service string `yaml:"service,omitempty"`
+	Rule     string `yaml:"rule,omitempty"`
+	Service  string `yaml:"service,omitempty"`
+	Priority int    `yaml:"priority,omitempty"`
 }
 
 type HTTPService struct {

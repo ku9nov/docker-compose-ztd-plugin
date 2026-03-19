@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 )
 
 func Parse(rawArgs []string) (Config, error) {
@@ -17,6 +18,7 @@ func Parse(rawArgs []string) (Config, error) {
 		Weight:               DefaultCanaryWeight,
 	}
 	weightExplicitlySet := false
+	strategyExplicitlySet := false
 
 	args := rawArgs
 	if ztdIdx := indexOf(args, "ztd"); ztdIdx >= 0 {
@@ -96,6 +98,7 @@ func Parse(rawArgs []string) (Config, error) {
 				return cfg, err
 			}
 			cfg.Strategy = value
+			strategyExplicitlySet = true
 			args = args[consumed:]
 		case token == "--host-mode" || strings.HasPrefix(token, "--host-mode="):
 			value, consumed, err := parseStringFlag(args, "--host-mode")
@@ -109,11 +112,17 @@ func Parse(rawArgs []string) (Config, error) {
 			if err != nil {
 				return cfg, err
 			}
+			if err := validateHeaderMode(value); err != nil {
+				return cfg, err
+			}
 			cfg.HeadersMode = value
 			args = args[consumed:]
 		case token == "--cookies-mode" || strings.HasPrefix(token, "--cookies-mode="):
 			value, consumed, err := parseStringFlag(args, "--cookies-mode")
 			if err != nil {
+				return cfg, err
+			}
+			if err := validateCookieMode(value); err != nil {
 				return cfg, err
 			}
 			cfg.CookiesMode = value
@@ -133,25 +142,62 @@ func Parse(rawArgs []string) (Config, error) {
 			cfg.Weight = value
 			weightExplicitlySet = true
 			args = args[consumed:]
+		case token == "--to" || strings.HasPrefix(token, "--to="):
+			value, consumed, err := parseStringFlag(args, "--to")
+			if err != nil {
+				return cfg, err
+			}
+			cfg.SwitchTo = value
+			args = args[consumed:]
+		case token == "--auto-cleanup" || strings.HasPrefix(token, "--auto-cleanup="):
+			value, consumed, err := parseStringFlag(args, "--auto-cleanup")
+			if err != nil {
+				return cfg, err
+			}
+			d, err := time.ParseDuration(value)
+			if err != nil {
+				return cfg, fmt.Errorf("invalid --auto-cleanup: %w", err)
+			}
+			if d <= 0 {
+				return cfg, fmt.Errorf("--auto-cleanup must be greater than 0")
+			}
+			cfg.AutoCleanup = d
+			args = args[consumed:]
 		default:
 			if len(token) > 0 && token[0] == '-' {
 				return cfg, fmt.Errorf("unknown option: %s", token)
 			}
 
-			if cfg.Service != "" && cfg.Service != token {
-				return cfg, fmt.Errorf("SERVICE is already set to '%s'", cfg.Service)
+			if cfg.Service == "" {
+				cfg.Service = token
+				args = args[1:]
+				continue
 			}
 
-			cfg.Service = token
-			args = args[1:]
+			if cfg.Action == "" && isActionToken(token) {
+				cfg.Action = token
+				args = args[1:]
+				continue
+			}
+
+			return cfg, fmt.Errorf("unexpected token: %s", token)
 		}
 	}
 
-	if err := validateStrategy(cfg, weightExplicitlySet); err != nil {
+	if err := validateStrategy(&cfg, weightExplicitlySet, strategyExplicitlySet); err != nil {
 		return cfg, err
 	}
 
 	return cfg, nil
+}
+
+func isActionToken(token string) bool {
+	switch token {
+	case ActionSwitch, ActionCleanup:
+		return true
+	default:
+		return false
+	}
 }
 
 func indexOf(items []string, target string) int {
@@ -196,7 +242,7 @@ func parseInlineValue(token string, flag string) (string, bool) {
 	return "", false
 }
 
-func validateStrategy(cfg Config, weightExplicitlySet bool) error {
+func validateStrategy(cfg *Config, weightExplicitlySet bool, strategyExplicitlySet bool) error {
 	switch cfg.Strategy {
 	case StrategyRolling:
 	case StrategyBlueGreen:
@@ -218,5 +264,67 @@ func validateStrategy(cfg Config, weightExplicitlySet bool) error {
 		return fmt.Errorf("--weight must be between 1 and 100 for --strategy=%s", StrategyCanary)
 	}
 
+	if cfg.Action != ActionDeploy {
+		if !strategyExplicitlySet {
+			cfg.Strategy = StrategyBlueGreen
+		}
+		if cfg.Strategy != StrategyBlueGreen {
+			return fmt.Errorf("%s action requires --strategy=%s", cfg.Action, StrategyBlueGreen)
+		}
+	}
+
+	if cfg.SwitchTo != "" {
+		if cfg.Action != ActionSwitch {
+			return fmt.Errorf("--to requires action %s", ActionSwitch)
+		}
+		if cfg.SwitchTo != "blue" && cfg.SwitchTo != "green" {
+			return fmt.Errorf("--to must be either blue or green")
+		}
+	}
+
+	if cfg.AutoCleanup > 0 && cfg.Action != ActionSwitch {
+		return fmt.Errorf("--auto-cleanup requires action %s", ActionSwitch)
+	}
+
+	return nil
+}
+
+func validateHeaderMode(value string) error {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return fmt.Errorf("--headers-mode value is empty")
+	}
+	parts := strings.SplitN(value, "=", 2)
+	if len(parts) != 2 {
+		return fmt.Errorf("--headers-mode must be in format HeaderName=HeaderValue")
+	}
+	name := strings.TrimSpace(parts[0])
+	headerValue := strings.TrimSpace(parts[1])
+	if name == "" || headerValue == "" {
+		return fmt.Errorf("--headers-mode must include non-empty header name and value")
+	}
+	if strings.ContainsAny(name, " \t\r\n") {
+		return fmt.Errorf("--headers-mode header name must not contain whitespace")
+	}
+	return nil
+}
+
+func validateCookieMode(value string) error {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return fmt.Errorf("--cookies-mode value is empty")
+	}
+	parts := strings.SplitN(value, "=", 2)
+	if len(parts) != 2 {
+		return fmt.Errorf("--cookies-mode must be in format CookieName=CookieValue")
+	}
+	name := strings.TrimSpace(parts[0])
+	cookieValue := strings.TrimSpace(parts[1])
+	if name == "" || cookieValue == "" {
+		return fmt.Errorf("--cookies-mode must include non-empty cookie name and value")
+	}
+	if strings.ContainsAny(name, " \t\r\n") {
+		return fmt.Errorf("--cookies-mode cookie name must not contain whitespace")
+	}
 	return nil
 }

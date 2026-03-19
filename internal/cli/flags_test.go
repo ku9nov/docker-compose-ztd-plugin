@@ -1,6 +1,9 @@
 package cli
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestParse_ServiceAndFlags(t *testing.T) {
 	cfg, err := Parse([]string{
@@ -53,8 +56,8 @@ func TestParse_BlueGreenStrategyWithModes(t *testing.T) {
 	cfg, err := Parse([]string{
 		"--strategy=blue-green",
 		"--host-mode=green.example.com",
-		"--headers-mode=Headers(`X-Env`, `green`)",
-		"--cookies-mode=HeadersRegexp(`Cookie`, `env=green`)",
+		"--headers-mode=X-Env=green",
+		"--cookies-mode=env=green",
 		"--ip-mode=10.0.0.0/24",
 		"example",
 	})
@@ -67,6 +70,28 @@ func TestParse_BlueGreenStrategyWithModes(t *testing.T) {
 	}
 	if cfg.HostMode != "green.example.com" || cfg.IPMode != "10.0.0.0/24" {
 		t.Fatalf("unexpected blue-green flags: %+v", cfg)
+	}
+}
+
+func TestParse_BlueGreenHeadersModeInvalidFormatFails(t *testing.T) {
+	_, err := Parse([]string{
+		"--strategy=blue-green",
+		"--headers-mode=Headers(`X-Env`, `green`)",
+		"example",
+	})
+	if err == nil {
+		t.Fatal("expected parse error for invalid headers-mode format")
+	}
+}
+
+func TestParse_BlueGreenCookiesModeInvalidFormatFails(t *testing.T) {
+	_, err := Parse([]string{
+		"--strategy=blue-green",
+		"--cookies-mode=HeadersRegexp(`Cookie`, `env=green`)",
+		"example",
+	})
+	if err == nil {
+		t.Fatal("expected parse error for invalid cookies-mode format")
 	}
 }
 
@@ -93,6 +118,70 @@ func TestParse_WeightWithoutCanaryFails(t *testing.T) {
 		"--strategy=rolling",
 		"--weight=10",
 		"example",
+	})
+	if err == nil {
+		t.Fatal("expected parse error")
+	}
+}
+
+func TestParse_BlueGreenSwitchActionWithAutoCleanup(t *testing.T) {
+	cfg, err := Parse([]string{
+		"--strategy=blue-green",
+		"--auto-cleanup=10m",
+		"--to=green",
+		"api",
+		"switch",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Service != "api" {
+		t.Fatalf("expected api service, got %s", cfg.Service)
+	}
+	if cfg.Action != ActionSwitch {
+		t.Fatalf("expected action switch, got %s", cfg.Action)
+	}
+	if cfg.SwitchTo != "green" {
+		t.Fatalf("expected switch target green, got %s", cfg.SwitchTo)
+	}
+	if cfg.AutoCleanup != 10*time.Minute {
+		t.Fatalf("expected auto cleanup 10m, got %s", cfg.AutoCleanup)
+	}
+}
+
+func TestParse_ActionDefaultsStrategyToBlueGreen(t *testing.T) {
+	cfg, err := Parse([]string{
+		"api",
+		"cleanup",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Strategy != StrategyBlueGreen {
+		t.Fatalf("expected strategy %s, got %s", StrategyBlueGreen, cfg.Strategy)
+	}
+	if cfg.Action != ActionCleanup {
+		t.Fatalf("expected cleanup action, got %s", cfg.Action)
+	}
+}
+
+func TestParse_AutoCleanupRequiresSwitch(t *testing.T) {
+	_, err := Parse([]string{
+		"--strategy=blue-green",
+		"--auto-cleanup=10m",
+		"api",
+	})
+	if err == nil {
+		t.Fatal("expected parse error")
+	}
+}
+
+func TestParse_ToRequiresSwitch(t *testing.T) {
+	_, err := Parse([]string{
+		"--strategy=blue-green",
+		"--to=green",
+		"api",
+		"cleanup",
 	})
 	if err == nil {
 		t.Fatal("expected parse error")

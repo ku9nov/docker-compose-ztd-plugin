@@ -15,8 +15,13 @@ func PluginMetadata() string {
 func Usage() string {
 	return fmt.Sprintf(`
 Usage: docker ztd [OPTIONS] SERVICE
+       docker ztd [OPTIONS] SERVICE ACTION
 
 Rolling new Compose service version.
+
+Actions (blue-green only):
+  switch                    Switch active traffic between blue and green
+  cleanup                   Stop/remove inactive color containers and clear state
 
 Options:
   -h, --help                  Print usage
@@ -31,10 +36,12 @@ Options:
       --strategy TYPE         Deployment strategy (default: %s, options: rolling, blue-green, canary)
       --traefik-conf FILE     Specify Traefik configuration file (default: %s)
       --host-mode VALUE       blue-green mode (example: green.example.com)
-      --headers-mode VALUE    blue-green mode (example: Headers('X-Env', 'green'))
-      --cookies-mode VALUE    blue-green mode (example: HeadersRegexp('Cookie', 'env=green'))
+      --headers-mode VALUE    blue-green mode (example: X-Env=green)
+      --cookies-mode VALUE    blue-green mode (example: env=green)
       --ip-mode VALUE         blue-green mode (example: 10.0.0.0/24)
       --weight N              canary mode (default: %d)
+      --to COLOR              switch action target color (blue|green)
+      --auto-cleanup DURATION switch action only (example: 10m, 1h30m)
 
 `, DefaultHealthcheckTimeout, DefaultNoHealthcheckTimeout, DefaultStrategy, DefaultTraefikConfig, DefaultCanaryWeight)
 }

@@ -1,5 +1,7 @@
 package cli
 
+import "time"
+
 const (
 	DefaultHealthcheckTimeout   = 60
 	DefaultNoHealthcheckTimeout = 10
@@ -14,6 +16,12 @@ const (
 	StrategyRolling   = "rolling"
 	StrategyBlueGreen = "blue-green"
 	StrategyCanary    = "canary"
+)
+
+const (
+	ActionDeploy  = ""
+	ActionSwitch  = "switch"
+	ActionCleanup = "cleanup"
 )
 
 type Config struct {
@@ -31,6 +39,9 @@ type Config struct {
 	CookiesMode          string
 	IPMode               string
 	Weight               int
+	Action               string
+	SwitchTo             string
+	AutoCleanup          time.Duration
 	Service              string
 	UpDetached           bool
 	ShowHelp             bool
