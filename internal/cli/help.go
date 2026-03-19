@@ -28,7 +28,13 @@ Options:
                               before stopping the old container (default: 0 seconds)
       --env-file FILE         Specify an alternate environment file
       --proxy TYPE            Set proxy type (default: traefik, options: traefik, nginx-proxy)
+      --strategy TYPE         Deployment strategy (default: %s, options: rolling, blue-green, canary)
       --traefik-conf FILE     Specify Traefik configuration file (default: %s)
+      --host-mode VALUE       blue-green mode (example: green.example.com)
+      --headers-mode VALUE    blue-green mode (example: Headers('X-Env', 'green'))
+      --cookies-mode VALUE    blue-green mode (example: HeadersRegexp('Cookie', 'env=green'))
+      --ip-mode VALUE         blue-green mode (example: 10.0.0.0/24)
+      --weight N              canary mode (default: %d)
 
-`, DefaultHealthcheckTimeout, DefaultNoHealthcheckTimeout, DefaultTraefikConfig)
+`, DefaultHealthcheckTimeout, DefaultNoHealthcheckTimeout, DefaultStrategy, DefaultTraefikConfig, DefaultCanaryWeight)
 }

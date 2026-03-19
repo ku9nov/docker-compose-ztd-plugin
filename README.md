@@ -78,7 +78,13 @@ Options:
 - `--wait-after-healthy N`
 - `--env-file FILE`
 - `--proxy TYPE`
+- `--strategy TYPE` (`rolling` default, `blue-green`, `canary`)
 - `--traefik-conf FILE`
+- `--host-mode VALUE` (blue-green only)
+- `--headers-mode VALUE` (blue-green only)
+- `--cookies-mode VALUE` (blue-green only)
+- `--ip-mode VALUE` (blue-green only)
+- `--weight N` (canary only, default: `10`)
 
 
 ## Traefik Labels Supported

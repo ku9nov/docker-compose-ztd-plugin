@@ -8,6 +8,8 @@ import (
 
 	"github.com/sirupsen/logrus"
 
+	bluegreen "github.com/ku9nov/docker-compose-ztd-plugin/internal/blue-green"
+	"github.com/ku9nov/docker-compose-ztd-plugin/internal/canary"
 	"github.com/ku9nov/docker-compose-ztd-plugin/internal/cli"
 	"github.com/ku9nov/docker-compose-ztd-plugin/internal/compose"
 	"github.com/ku9nov/docker-compose-ztd-plugin/internal/docker"
@@ -48,17 +50,39 @@ func (r *Runner) Run(ctx context.Context, cfg cli.Config) error {
 		return nil
 	}
 
-	updater := rollout.NewUpdater(r.log, composeAdapter, dockerClient, generator)
-	return updater.Run(ctx, rollout.Options{
-		Service:              cfg.Service,
-		ComposeFiles:         cfg.ComposeFiles,
-		EnvFiles:             cfg.EnvFiles,
-		HealthcheckTimeout:   cfg.HealthcheckTimeout,
-		NoHealthcheckTimeout: cfg.NoHealthcheckTimeout,
-		WaitAfterHealthy:     cfg.WaitAfterHealthy,
-		ProxyType:            cfg.ProxyType,
-		TraefikConfigFile:    cfg.TraefikConfigFile,
-	})
+	switch cfg.Strategy {
+	case cli.StrategyRolling:
+		updater := rollout.NewUpdater(r.log, composeAdapter, dockerClient, generator)
+		return updater.Run(ctx, rollout.Options{
+			Service:              cfg.Service,
+			ComposeFiles:         cfg.ComposeFiles,
+			EnvFiles:             cfg.EnvFiles,
+			HealthcheckTimeout:   cfg.HealthcheckTimeout,
+			NoHealthcheckTimeout: cfg.NoHealthcheckTimeout,
+			WaitAfterHealthy:     cfg.WaitAfterHealthy,
+			ProxyType:            cfg.ProxyType,
+			TraefikConfigFile:    cfg.TraefikConfigFile,
+		})
+	case cli.StrategyBlueGreen:
+		return bluegreen.Run(ctx, r.log, bluegreen.Options{
+			Service:      cfg.Service,
+			ComposeFiles: cfg.ComposeFiles,
+			EnvFiles:     cfg.EnvFiles,
+			HostMode:     cfg.HostMode,
+			HeadersMode:  cfg.HeadersMode,
+			CookiesMode:  cfg.CookiesMode,
+			IPMode:       cfg.IPMode,
+		})
+	case cli.StrategyCanary:
+		return canary.Run(ctx, r.log, canary.Options{
+			Service:      cfg.Service,
+			ComposeFiles: cfg.ComposeFiles,
+			EnvFiles:     cfg.EnvFiles,
+			Weight:       cfg.Weight,
+		})
+	default:
+		return fmt.Errorf("unsupported strategy: %s", cfg.Strategy)
+	}
 }
 
 func selectComposeAdapter(cfg cli.Config) (compose.Adapter, error) {
