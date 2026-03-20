@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"sort"
 	"time"
 
 	"github.com/sirupsen/logrus"
@@ -12,6 +13,7 @@ import (
 	"github.com/ku9nov/docker-compose-ztd-plugin/internal/canary"
 	"github.com/ku9nov/docker-compose-ztd-plugin/internal/cli"
 	"github.com/ku9nov/docker-compose-ztd-plugin/internal/compose"
+	"github.com/ku9nov/docker-compose-ztd-plugin/internal/configio"
 	"github.com/ku9nov/docker-compose-ztd-plugin/internal/docker"
 	"github.com/ku9nov/docker-compose-ztd-plugin/internal/rollout"
 	"github.com/ku9nov/docker-compose-ztd-plugin/internal/state"
@@ -53,6 +55,16 @@ func (r *Runner) Run(ctx context.Context, cfg cli.Config) error {
 	}
 
 	if cfg.Service == "up" {
+		composeServices, err := collectComposeServices(cfg.ComposeFiles)
+		if err != nil {
+			return fmt.Errorf("failed to read compose services: %w", err)
+		}
+		if deleted, err := store.DeleteByServiceNames(composeServices); err != nil {
+			return fmt.Errorf("failed to clean service states before up: %w", err)
+		} else if deleted > 0 {
+			r.log.WithField("statesDeleted", deleted).Info("==> Removed stale service state files before up.")
+		}
+
 		r.log.Info("==> Bringing up services.")
 		if err := composeAdapter.Up(ctx, cfg.ComposeFiles, cfg.EnvFiles, "", cfg.UpDetached, false); err != nil {
 			return err
@@ -114,6 +126,36 @@ func (r *Runner) Run(ctx context.Context, cfg cli.Config) error {
 	default:
 		return fmt.Errorf("unsupported strategy: %s", cfg.Strategy)
 	}
+}
+
+type composeServicesFile struct {
+	Services map[string]any `yaml:"services"`
+}
+
+func collectComposeServices(files []string) ([]string, error) {
+	services := map[string]struct{}{}
+	for _, file := range files {
+		data, err := os.ReadFile(file)
+		if err != nil {
+			return nil, err
+		}
+
+		var cfg composeServicesFile
+		if err := configio.UnmarshalYAML(data, &cfg); err != nil {
+			return nil, err
+		}
+
+		for service := range cfg.Services {
+			services[service] = struct{}{}
+		}
+	}
+
+	out := make([]string, 0, len(services))
+	for service := range services {
+		out = append(out, service)
+	}
+	sort.Strings(out)
+	return out, nil
 }
 
 func selectComposeAdapter(cfg cli.Config) (compose.Adapter, error) {

@@ -101,6 +101,45 @@ func (s *Store) Delete(project string) error {
 	return nil
 }
 
+func (s *Store) DeleteByServiceNames(services []string) (int, error) {
+	if len(services) == 0 {
+		return 0, nil
+	}
+
+	wantedServices := make(map[string]struct{}, len(services))
+	for _, service := range services {
+		service = strings.TrimSpace(service)
+		if service == "" {
+			continue
+		}
+		wantedServices[service] = struct{}{}
+	}
+	if len(wantedServices) == 0 {
+		return 0, nil
+	}
+
+	projects, err := s.ListProjects()
+	if err != nil {
+		return 0, err
+	}
+
+	deleted := 0
+	for _, project := range projects {
+		for service := range wantedServices {
+			if !strings.HasSuffix(project, "--"+service) {
+				continue
+			}
+			if err := s.Delete(project); err != nil {
+				return deleted, err
+			}
+			deleted++
+			break
+		}
+	}
+
+	return deleted, nil
+}
+
 func (s *Store) ListProjects() ([]string, error) {
 	entries, err := os.ReadDir(s.baseDir)
 	if err != nil {

@@ -139,3 +139,47 @@ func TestStoreSaveLoadCanaryState(t *testing.T) {
 		t.Fatalf("unexpected canary state: %+v", got)
 	}
 }
+
+func TestStoreDeleteByServiceNames(t *testing.T) {
+	t.Parallel()
+
+	store := NewStore(t.TempDir())
+	now := time.Now().UTC()
+
+	stateFor := func(service string) DeploymentState {
+		return DeploymentState{
+			Service:   service,
+			Strategy:  StrategyBlueGreen,
+			Blue:      []string{"a"},
+			Green:     []string{"b"},
+			Active:    ColorBlue,
+			CreatedAt: now,
+		}
+	}
+
+	if err := store.Save("project-a--api", stateFor("api")); err != nil {
+		t.Fatalf("save api state failed: %v", err)
+	}
+	if err := store.Save("project-a--worker", stateFor("worker")); err != nil {
+		t.Fatalf("save worker state failed: %v", err)
+	}
+	if err := store.Save("project-b--api", stateFor("api")); err != nil {
+		t.Fatalf("save api state for second project failed: %v", err)
+	}
+
+	deleted, err := store.DeleteByServiceNames([]string{"api"})
+	if err != nil {
+		t.Fatalf("delete by service names failed: %v", err)
+	}
+	if deleted != 2 {
+		t.Fatalf("expected 2 deleted states, got %d", deleted)
+	}
+
+	projects, err := store.ListProjects()
+	if err != nil {
+		t.Fatalf("list states failed: %v", err)
+	}
+	if len(projects) != 1 || projects[0] != "project-a--worker" {
+		t.Fatalf("unexpected remaining states: %v", projects)
+	}
+}
