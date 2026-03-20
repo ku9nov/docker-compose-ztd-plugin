@@ -187,3 +187,68 @@ func TestParse_ToRequiresSwitch(t *testing.T) {
 		t.Fatal("expected parse error")
 	}
 }
+
+func TestParse_CanaryPromoteDefaultsStrategyToCanary(t *testing.T) {
+	cfg, err := Parse([]string{
+		"--weight=70",
+		"api",
+		"promote",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Strategy != StrategyCanary {
+		t.Fatalf("expected strategy %s, got %s", StrategyCanary, cfg.Strategy)
+	}
+	if cfg.Action != ActionPromote {
+		t.Fatalf("expected action promote, got %s", cfg.Action)
+	}
+	if cfg.Weight != 70 {
+		t.Fatalf("expected weight 70, got %d", cfg.Weight)
+	}
+}
+
+func TestParse_CanaryRollbackDefaultsStrategyToCanary(t *testing.T) {
+	cfg, err := Parse([]string{
+		"api",
+		"rollback",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Strategy != StrategyCanary {
+		t.Fatalf("expected strategy %s, got %s", StrategyCanary, cfg.Strategy)
+	}
+	if cfg.Action != ActionRollback {
+		t.Fatalf("expected action rollback, got %s", cfg.Action)
+	}
+}
+
+func TestParse_PromoteRequiresCanaryStrategy(t *testing.T) {
+	_, err := Parse([]string{
+		"--strategy=blue-green",
+		"--weight=50",
+		"api",
+		"promote",
+	})
+	if err == nil {
+		t.Fatal("expected parse error")
+	}
+}
+
+func TestParse_AutoCleanupAllowsCanaryRollback(t *testing.T) {
+	cfg, err := Parse([]string{
+		"--auto-cleanup=10m",
+		"api",
+		"rollback",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Action != ActionRollback {
+		t.Fatalf("expected action rollback, got %s", cfg.Action)
+	}
+	if cfg.AutoCleanup != 10*time.Minute {
+		t.Fatalf("expected auto cleanup 10m, got %s", cfg.AutoCleanup)
+	}
+}

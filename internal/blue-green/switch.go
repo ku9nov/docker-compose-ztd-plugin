@@ -2,12 +2,15 @@ package bluegreen
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/ku9nov/docker-compose-ztd-plugin/internal/state"
 	"github.com/ku9nov/docker-compose-ztd-plugin/internal/traefik"
 )
+
+var errBlueGreenStateNotFound = errors.New("blue-green state not found")
 
 func (d *Deployer) switchTraffic(ctx context.Context, opt Options) error {
 	project, currentState, err := d.findStateByService(opt.Service)
@@ -100,7 +103,7 @@ func (d *Deployer) findStateByService(service string) (string, state.DeploymentS
 		matchedState = st
 	}
 	if matchedProject == "" {
-		return "", state.DeploymentState{}, fmt.Errorf("blue-green state for service %s not found", service)
+		return "", state.DeploymentState{}, fmt.Errorf("%w for service %s", errBlueGreenStateNotFound, service)
 	}
 	return matchedProject, matchedState, nil
 }

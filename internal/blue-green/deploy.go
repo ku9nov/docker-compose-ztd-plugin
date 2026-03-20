@@ -2,6 +2,7 @@ package bluegreen
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -71,6 +72,17 @@ func (d *Deployer) Run(ctx context.Context, opt Options) (err error) {
 }
 
 func (d *Deployer) deploy(ctx context.Context, opt Options) (err error) {
+	project, existingState, err := d.findStateByService(opt.Service)
+	if err == nil {
+		if err := d.validateStateContainersArePresent(ctx, opt, existingState); err != nil {
+			return err
+		}
+		return fmt.Errorf("blue-green state for service %s already exists (key: %s); finish current cycle with switch/cleanup before starting a new deploy", opt.Service, project)
+	}
+	if err != nil && !errors.Is(err, errBlueGreenStateNotFound) {
+		return err
+	}
+
 	oldIDs, err := d.compose.PsQuiet(ctx, opt.ComposeFiles, opt.EnvFiles, opt.Service)
 	if err != nil {
 		return err
@@ -139,7 +151,7 @@ func (d *Deployer) deploy(ctx context.Context, opt Options) (err error) {
 	if err != nil {
 		return err
 	}
-	project, err := state.ResolveProjectName(labels, os.Getenv("COMPOSE_PROJECT_NAME"))
+	project, err = state.ResolveProjectName(labels, os.Getenv("COMPOSE_PROJECT_NAME"))
 	if err != nil {
 		return err
 	}
@@ -259,6 +271,34 @@ func diffIDs(oldIDs []string, allIDs []string) []string {
 	var out []string
 	for _, id := range allIDs {
 		if _, exists := old[id]; !exists {
+			out = append(out, id)
+		}
+	}
+	return out
+}
+
+func (d *Deployer) validateStateContainersArePresent(ctx context.Context, opt Options, st state.DeploymentState) error {
+	currentIDs, err := d.compose.PsQuiet(ctx, opt.ComposeFiles, opt.EnvFiles, st.Service)
+	if err != nil {
+		return err
+	}
+	currentSet := map[string]struct{}{}
+	for _, id := range currentIDs {
+		currentSet[id] = struct{}{}
+	}
+
+	missingBlue := missingIDs(st.Blue, currentSet)
+	missingGreen := missingIDs(st.Green, currentSet)
+	if len(missingBlue) == 0 && len(missingGreen) == 0 {
+		return nil
+	}
+	return fmt.Errorf("blue-green state drift detected for service %s: missing blue=%v green=%v; run cleanup and start a fresh cycle", st.Service, missingBlue, missingGreen)
+}
+
+func missingIDs(expected []string, current map[string]struct{}) []string {
+	out := make([]string, 0)
+	for _, id := range expected {
+		if _, ok := current[id]; !ok {
 			out = append(out, id)
 		}
 	}

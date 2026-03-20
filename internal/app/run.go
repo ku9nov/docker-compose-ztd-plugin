@@ -36,12 +36,20 @@ func (r *Runner) Run(ctx context.Context, cfg cli.Config) error {
 	generator := traefik.NewGenerator(composeAdapter, dockerClient)
 	store := state.NewStore(state.DefaultStateDir)
 	bgDeployer := bluegreen.NewDeployer(r.log, composeAdapter, dockerClient, store)
+	canaryDeployer := canary.NewDeployer(r.log, composeAdapter, dockerClient, store)
 
 	cleanupWorker := state.NewCleanupWorker(store, func(ctx context.Context, project string, st state.DeploymentState) error {
-		return bgDeployer.CleanupProjectState(ctx, project, st, cfg.TraefikConfigFile)
+		switch st.Strategy {
+		case state.StrategyBlueGreen:
+			return bgDeployer.CleanupProjectState(ctx, project, st, cfg.TraefikConfigFile)
+		case state.StrategyCanary:
+			return canaryDeployer.CleanupProjectState(ctx, project, st, cfg.TraefikConfigFile)
+		default:
+			return nil
+		}
 	})
 	if err := cleanupWorker.ProcessOverdue(ctx); err != nil {
-		r.log.WithError(err).Warn("==> Failed to process overdue blue-green cleanups")
+		r.log.WithError(err).Warn("==> Failed to process overdue scheduled cleanups")
 	}
 
 	if cfg.Service == "up" {
@@ -91,11 +99,17 @@ func (r *Runner) Run(ctx context.Context, cfg cli.Config) error {
 			WaitAfterHealthy:  cfg.WaitAfterHealthy,
 		})
 	case cli.StrategyCanary:
-		return canary.Run(ctx, r.log, canary.Options{
-			Service:      cfg.Service,
-			ComposeFiles: cfg.ComposeFiles,
-			EnvFiles:     cfg.EnvFiles,
-			Weight:       cfg.Weight,
+		return canaryDeployer.Run(ctx, canary.Options{
+			Service:           cfg.Service,
+			Action:            cfg.Action,
+			ComposeFiles:      cfg.ComposeFiles,
+			EnvFiles:          cfg.EnvFiles,
+			Weight:            cfg.Weight,
+			TraefikConfigFile: cfg.TraefikConfigFile,
+			AutoCleanup:       cfg.AutoCleanup,
+			HealthTimeout:     cfg.HealthcheckTimeout,
+			NoHealthTimeout:   cfg.NoHealthcheckTimeout,
+			WaitAfterHealthy:  cfg.WaitAfterHealthy,
 		})
 	default:
 		return fmt.Errorf("unsupported strategy: %s", cfg.Strategy)

@@ -110,3 +110,32 @@ func TestStoreKeepsMultipleServiceStates(t *testing.T) {
 		t.Fatalf("expected 2 state files, got %d (%v)", len(projects), projects)
 	}
 }
+
+func TestStoreSaveLoadCanaryState(t *testing.T) {
+	t.Parallel()
+
+	store := NewStore(t.TempDir())
+	now := time.Now().UTC()
+	st := DeploymentState{
+		Service:   "api",
+		Strategy:  StrategyCanary,
+		Old:       []string{"old-a"},
+		New:       []string{"new-a"},
+		Weight:    10,
+		CreatedAt: now,
+	}
+
+	if err := store.Save("project-canary", st); err != nil {
+		t.Fatalf("save failed: %v", err)
+	}
+	got, err := store.Load("project-canary")
+	if err != nil {
+		t.Fatalf("load failed: %v", err)
+	}
+	if got.Strategy != StrategyCanary {
+		t.Fatalf("unexpected strategy: %+v", got)
+	}
+	if got.Weight != 10 || len(got.Old) != 1 || len(got.New) != 1 {
+		t.Fatalf("unexpected canary state: %+v", got)
+	}
+}

@@ -193,7 +193,7 @@ func Parse(rawArgs []string) (Config, error) {
 
 func isActionToken(token string) bool {
 	switch token {
-	case ActionSwitch, ActionCleanup:
+	case ActionSwitch, ActionCleanup, ActionPromote, ActionRollback:
 		return true
 	default:
 		return false
@@ -257,20 +257,24 @@ func validateStrategy(cfg *Config, weightExplicitlySet bool, strategyExplicitlyS
 		}
 	}
 
+	if cfg.Action != ActionDeploy {
+		if !strategyExplicitlySet {
+			cfg.Strategy = defaultStrategyForAction(cfg.Action)
+		}
+		required, ok := requiredStrategyForAction(cfg.Action)
+		if !ok {
+			return fmt.Errorf("unsupported action: %s", cfg.Action)
+		}
+		if required != "" && cfg.Strategy != required {
+			return fmt.Errorf("%s action requires --strategy=%s", cfg.Action, required)
+		}
+	}
+
 	if cfg.Strategy != StrategyCanary && weightExplicitlySet {
 		return fmt.Errorf("--weight requires --strategy=%s", StrategyCanary)
 	}
 	if cfg.Strategy == StrategyCanary && (cfg.Weight <= 0 || cfg.Weight > 100) {
 		return fmt.Errorf("--weight must be between 1 and 100 for --strategy=%s", StrategyCanary)
-	}
-
-	if cfg.Action != ActionDeploy {
-		if !strategyExplicitlySet {
-			cfg.Strategy = StrategyBlueGreen
-		}
-		if cfg.Strategy != StrategyBlueGreen {
-			return fmt.Errorf("%s action requires --strategy=%s", cfg.Action, StrategyBlueGreen)
-		}
 	}
 
 	if cfg.SwitchTo != "" {
@@ -282,11 +286,35 @@ func validateStrategy(cfg *Config, weightExplicitlySet bool, strategyExplicitlyS
 		}
 	}
 
-	if cfg.AutoCleanup > 0 && cfg.Action != ActionSwitch {
-		return fmt.Errorf("--auto-cleanup requires action %s", ActionSwitch)
+	if cfg.AutoCleanup > 0 && cfg.Action != ActionSwitch && cfg.Action != ActionPromote && cfg.Action != ActionRollback {
+		return fmt.Errorf("--auto-cleanup requires action %s, %s or %s", ActionSwitch, ActionPromote, ActionRollback)
 	}
 
 	return nil
+}
+
+func requiredStrategyForAction(action string) (string, bool) {
+	switch action {
+	case ActionSwitch:
+		return StrategyBlueGreen, true
+	case ActionPromote, ActionRollback:
+		return StrategyCanary, true
+	case ActionCleanup:
+		return "", true
+	default:
+		return "", false
+	}
+}
+
+func defaultStrategyForAction(action string) string {
+	switch action {
+	case ActionPromote, ActionRollback:
+		return StrategyCanary
+	case ActionSwitch, ActionCleanup:
+		return StrategyBlueGreen
+	default:
+		return DefaultStrategy
+	}
 }
 
 func validateHeaderMode(value string) error {

@@ -19,9 +19,11 @@ Usage: docker ztd [OPTIONS] SERVICE
 
 Rolling new Compose service version.
 
-Actions (blue-green only):
-  switch                    Switch active traffic between blue and green
-  cleanup                   Stop/remove inactive color containers and clear state
+Actions:
+  switch                    blue-green only: switch active traffic between blue and green
+  promote                   canary only: change canary weight to --weight
+  rollback                  canary only: route 100%% traffic to old containers
+  cleanup                   blue-green/canary: cleanup inactive side and clear state
 
 Options:
   -h, --help                  Print usage
@@ -41,7 +43,7 @@ Options:
       --ip-mode VALUE         blue-green mode (example: 10.0.0.0/24)
       --weight N              canary mode (default: %d)
       --to COLOR              switch action target color (blue|green)
-      --auto-cleanup DURATION switch action only (example: 10m, 1h30m)
+      --auto-cleanup DURATION switch/promote/rollback actions only (example: 10m, 1h30m)
 
 `, DefaultHealthcheckTimeout, DefaultNoHealthcheckTimeout, DefaultStrategy, DefaultTraefikConfig, DefaultCanaryWeight)
 }

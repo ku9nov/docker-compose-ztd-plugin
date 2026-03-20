@@ -1,14 +1,12 @@
-package bluegreen
+package canary
 
 import (
 	"context"
-	"strings"
 	"testing"
 	"time"
 
-	"github.com/sirupsen/logrus"
-
 	"github.com/ku9nov/docker-compose-ztd-plugin/internal/state"
+	"github.com/sirupsen/logrus"
 )
 
 type dockerMock struct {
@@ -44,16 +42,16 @@ func (m *dockerMock) Remove(_ context.Context, ids []string) error {
 }
 func (m *dockerMock) Labels(context.Context, string) (map[string]string, error) { return m.labels, nil }
 
-func TestSwitchTrafficUpdatesState(t *testing.T) {
+func TestCleanupRejectsNonTerminalWeight(t *testing.T) {
 	t.Parallel()
 
 	store := state.NewStore(t.TempDir())
 	st := state.DeploymentState{
 		Service:   "api",
-		Strategy:  state.StrategyBlueGreen,
-		Blue:      []string{"blue-id"},
-		Green:     []string{"green-id"},
-		Active:    state.ColorBlue,
+		Strategy:  state.StrategyCanary,
+		Old:       []string{"old-id"},
+		New:       []string{"new-id"},
+		Weight:    30,
 		CreatedAt: time.Now().UTC(),
 	}
 	if err := store.Save("project", st); err != nil {
@@ -62,129 +60,118 @@ func TestSwitchTrafficUpdatesState(t *testing.T) {
 
 	deployer := NewDeployer(logrus.New(), nil, &dockerMock{
 		labels: map[string]string{
-			"traefik.http.routers.api.rule":                           "Host(`example.com`)",
-			"traefik.http.services.api.loadbalancer.server.port":      "8080",
-			"com.docker.compose.project":                              "project",
-			"traefik.http.services.api.loadbalancer.healthCheck.path": "/health",
+			"traefik.http.routers.api.rule":                      "Host(`example.com`)",
+			"traefik.http.services.api.loadbalancer.server.port": "8080",
 		},
 	}, store)
-
-	err := deployer.switchTraffic(context.Background(), Options{
+	err := deployer.cleanup(context.Background(), Options{
 		Service:           "api",
-		SwitchTo:          state.ColorGreen,
+		TraefikConfigFile: t.TempDir() + "/dynamic.yml",
+	})
+	if err == nil {
+		t.Fatal("expected cleanup error for non-terminal canary state")
+	}
+}
+
+func TestRollbackSetsZeroWeightAndAutoCleanup(t *testing.T) {
+	t.Parallel()
+
+	store := state.NewStore(t.TempDir())
+	st := state.DeploymentState{
+		Service:   "api",
+		Strategy:  state.StrategyCanary,
+		Old:       []string{"old-id"},
+		New:       []string{"new-id"},
+		Weight:    70,
+		CreatedAt: time.Now().UTC(),
+	}
+	if err := store.Save("project", st); err != nil {
+		t.Fatalf("save state: %v", err)
+	}
+
+	deployer := NewDeployer(logrus.New(), nil, &dockerMock{
+		labels: map[string]string{
+			"traefik.http.routers.api.rule":                      "Host(`example.com`)",
+			"traefik.http.services.api.loadbalancer.server.port": "8080",
+		},
+	}, store)
+	if err := deployer.rollback(context.Background(), Options{
+		Service:           "api",
 		TraefikConfigFile: t.TempDir() + "/dynamic.yml",
 		AutoCleanup:       10 * time.Minute,
-	})
-	if err != nil {
-		t.Fatalf("switch traffic failed: %v", err)
+	}); err != nil {
+		t.Fatalf("rollback failed: %v", err)
 	}
 
 	got, err := store.Load("project")
 	if err != nil {
 		t.Fatalf("load state: %v", err)
 	}
-	if got.Active != state.ColorGreen {
-		t.Fatalf("expected active green, got %s", got.Active)
+	if got.Weight != 0 {
+		t.Fatalf("expected weight 0, got %d", got.Weight)
 	}
 	if got.CleanupAt == nil {
-		t.Fatal("expected cleanupAt after --auto-cleanup switch")
+		t.Fatal("expected cleanupAt after rollback with auto-cleanup")
 	}
 }
 
-func TestCleanupInactiveRemovesState(t *testing.T) {
+func TestDeployReusesExistingCanaryStateWithoutScaling(t *testing.T) {
 	t.Parallel()
 
 	store := state.NewStore(t.TempDir())
 	st := state.DeploymentState{
 		Service:   "api",
-		Strategy:  state.StrategyBlueGreen,
-		Blue:      []string{"blue-id"},
-		Green:     []string{"green-id"},
-		Active:    state.ColorGreen,
+		Strategy:  state.StrategyCanary,
+		Old:       []string{"old-id"},
+		New:       []string{"new-id"},
+		Weight:    0,
 		CreatedAt: time.Now().UTC(),
 	}
 	if err := store.Save("project", st); err != nil {
 		t.Fatalf("save state: %v", err)
 	}
 
-	dock := &dockerMock{
+	compose := &composeMock{
+		idsByService: map[string][]string{
+			"api": {"old-id", "new-id"},
+		},
+	}
+	deployer := NewDeployer(logrus.New(), compose, &dockerMock{
 		labels: map[string]string{
 			"traefik.http.routers.api.rule":                      "Host(`example.com`)",
 			"traefik.http.services.api.loadbalancer.server.port": "8080",
 		},
-	}
-	deployer := NewDeployer(logrus.New(), nil, dock, store)
-	if err := deployer.cleanupInactive(context.Background(), Options{
+	}, store)
+	if err := deployer.deploy(context.Background(), Options{
 		Service:           "api",
+		Weight:            30,
 		TraefikConfigFile: t.TempDir() + "/dynamic.yml",
 	}); err != nil {
-		t.Fatalf("cleanup failed: %v", err)
-	}
-
-	if len(dock.stop) != 1 || dock.stop[0] != "blue-id" {
-		t.Fatalf("expected stop blue-id, got %#v", dock.stop)
-	}
-	if len(dock.remove) != 1 || dock.remove[0] != "blue-id" {
-		t.Fatalf("expected remove blue-id, got %#v", dock.remove)
-	}
-	if _, err := store.Load("project"); err == nil {
-		t.Fatal("expected state to be deleted after cleanup")
-	}
-}
-
-func TestDeployBlockedWhenBlueGreenStateExists(t *testing.T) {
-	t.Parallel()
-
-	store := state.NewStore(t.TempDir())
-	st := state.DeploymentState{
-		Service:   "api",
-		Strategy:  state.StrategyBlueGreen,
-		Blue:      []string{"blue-id"},
-		Green:     []string{"green-id"},
-		Active:    state.ColorBlue,
-		CreatedAt: time.Now().UTC(),
-	}
-	if err := store.Save("project", st); err != nil {
-		t.Fatalf("save state: %v", err)
-	}
-
-	compose := &composeMock{
-		idsByService: map[string][]string{
-			"api": {"blue-id", "green-id"},
-		},
-	}
-	deployer := NewDeployer(logrus.New(), compose, &dockerMock{
-		labels: map[string]string{
-			"traefik.http.routers.api.rule":                      "Host(`example.com`)",
-			"traefik.http.services.api.loadbalancer.server.port": "8080",
-		},
-	}, store)
-
-	err := deployer.deploy(context.Background(), Options{
-		Service:           "api",
-		TraefikConfigFile: t.TempDir() + "/dynamic.yml",
-	})
-	if err == nil {
-		t.Fatal("expected deploy to be blocked when state exists")
-	}
-	if !strings.Contains(err.Error(), "already exists") {
-		t.Fatalf("unexpected error: %v", err)
+		t.Fatalf("deploy failed: %v", err)
 	}
 	if compose.scaleCalls != 0 {
-		t.Fatalf("expected no scale calls, got %d", compose.scaleCalls)
+		t.Fatalf("expected no scaling when canary state exists, got %d scale calls", compose.scaleCalls)
+	}
+
+	got, err := store.Load("project")
+	if err != nil {
+		t.Fatalf("load state: %v", err)
+	}
+	if got.Weight != 30 {
+		t.Fatalf("expected weight 30, got %d", got.Weight)
 	}
 }
 
-func TestDeployFailsSafeOnBlueGreenStateDrift(t *testing.T) {
+func TestDeployFailsSafeOnStateDrift(t *testing.T) {
 	t.Parallel()
 
 	store := state.NewStore(t.TempDir())
 	st := state.DeploymentState{
 		Service:   "api",
-		Strategy:  state.StrategyBlueGreen,
-		Blue:      []string{"blue-id"},
-		Green:     []string{"green-id"},
-		Active:    state.ColorBlue,
+		Strategy:  state.StrategyCanary,
+		Old:       []string{"old-id"},
+		New:       []string{"new-id"},
+		Weight:    0,
 		CreatedAt: time.Now().UTC(),
 	}
 	if err := store.Save("project", st); err != nil {
@@ -193,7 +180,7 @@ func TestDeployFailsSafeOnBlueGreenStateDrift(t *testing.T) {
 
 	compose := &composeMock{
 		idsByService: map[string][]string{
-			"api": {"blue-id"},
+			"api": {"old-id"},
 		},
 	}
 	deployer := NewDeployer(logrus.New(), compose, &dockerMock{
@@ -202,15 +189,11 @@ func TestDeployFailsSafeOnBlueGreenStateDrift(t *testing.T) {
 			"traefik.http.services.api.loadbalancer.server.port": "8080",
 		},
 	}, store)
-
-	err := deployer.deploy(context.Background(), Options{
+	if err := deployer.deploy(context.Background(), Options{
 		Service:           "api",
+		Weight:            30,
 		TraefikConfigFile: t.TempDir() + "/dynamic.yml",
-	})
-	if err == nil {
-		t.Fatal("expected fail-safe error on blue-green state drift")
-	}
-	if !strings.Contains(err.Error(), "state drift") {
-		t.Fatalf("unexpected error: %v", err)
+	}); err == nil {
+		t.Fatal("expected fail-safe error when state drifts from running containers")
 	}
 }

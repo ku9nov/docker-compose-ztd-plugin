@@ -119,7 +119,7 @@ func setOrDeleteHTTPService(services map[string]types.HTTPService, name string, 
 		})
 	}
 	svc := types.HTTPService{
-		LoadBalancer: types.HTTPLoadBalancer{
+		LoadBalancer: &types.HTTPLoadBalancer{
 			Servers: servers,
 		},
 	}
@@ -127,6 +127,18 @@ func setOrDeleteHTTPService(services map[string]types.HTTPService, name string, 
 		svc.LoadBalancer.HealthCheck = hc
 	}
 	services[name] = svc
+}
+
+func setOrDeleteWeightedHTTPService(services map[string]types.HTTPService, name string, weighted []types.HTTPWeightedService) {
+	if len(weighted) == 0 {
+		delete(services, name)
+		return
+	}
+	services[name] = types.HTTPService{
+		Weighted: &types.HTTPWeightedRoute{
+			Services: weighted,
+		},
+	}
 }
 
 func setOrDeleteQARouter(routers map[string]types.HTTPRouter, name string, rule string, service string) {

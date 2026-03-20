@@ -17,12 +17,22 @@ type HTTPRouter struct {
 }
 
 type HTTPService struct {
-	LoadBalancer HTTPLoadBalancer `yaml:"loadBalancer,omitempty"`
+	LoadBalancer *HTTPLoadBalancer  `yaml:"loadBalancer,omitempty"`
+	Weighted     *HTTPWeightedRoute `yaml:"weighted,omitempty"`
 }
 
 type HTTPLoadBalancer struct {
 	Servers     []HTTPServer  `yaml:"servers,omitempty"`
 	HealthCheck *HealthChecks `yaml:"healthCheck,omitempty"`
+}
+
+type HTTPWeightedRoute struct {
+	Services []HTTPWeightedService `yaml:"services,omitempty"`
+}
+
+type HTTPWeightedService struct {
+	Name   string `yaml:"name,omitempty"`
+	Weight int    `yaml:"weight,omitempty"`
 }
 
 type HTTPServer struct {

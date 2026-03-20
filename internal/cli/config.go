@@ -19,9 +19,11 @@ const (
 )
 
 const (
-	ActionDeploy  = ""
-	ActionSwitch  = "switch"
-	ActionCleanup = "cleanup"
+	ActionDeploy   = ""
+	ActionSwitch   = "switch"
+	ActionCleanup  = "cleanup"
+	ActionPromote  = "promote"
+	ActionRollback = "rollback"
 )
 
 type Config struct {
