@@ -183,7 +183,23 @@ func (d *Deployer) deploy(ctx context.Context, opt Options) (err error) {
 	}); err != nil {
 		return err
 	}
-	if err := d.runMetricsGateWithRollback(ctx, opt, "deploy"); err != nil {
+	if baseline, baselineErr := d.captureServiceSnapshot(ctx, opt, canaryMetricServiceName(opt.Service, "new")); baselineErr != nil {
+		d.log.Warnf("==> Unable to capture canary baseline metrics: %v", baselineErr)
+	} else {
+		currentState.NewStats = &state.MetricsBaseline{
+			CapturedAt:    time.Now().UTC(),
+			Requests2xx:   baseline.Requests2xx,
+			Requests4xx:   baseline.Requests4xx,
+			Requests5xx:   baseline.Requests5xx,
+			DurationSum:   baseline.DurationSum,
+			DurationCount: baseline.DurationCount,
+		}
+		if saveErr := d.store.Save(stateKey, currentState); saveErr != nil {
+			d.log.Warnf("==> Unable to persist canary baseline metrics: %v", saveErr)
+		}
+	}
+
+	if err := d.runMetricsGateWithRollback(ctx, opt, "deploy", currentState); err != nil {
 		guard.Disarm()
 		return err
 	}
@@ -216,7 +232,8 @@ func (d *Deployer) deployFromExistingState(ctx context.Context, opt Options, pro
 	}); err != nil {
 		return err
 	}
-	if err := d.runMetricsGateWithRollback(ctx, opt, "deploy"); err != nil {
+	st = d.ensureCanaryBaseline(ctx, opt, project, st)
+	if err := d.runMetricsGateWithRollback(ctx, opt, "deploy", st); err != nil {
 		return err
 	}
 
@@ -262,7 +279,8 @@ func (d *Deployer) promote(ctx context.Context, opt Options) error {
 	}); err != nil {
 		return err
 	}
-	if err := d.runMetricsGateWithRollback(ctx, opt, "promote"); err != nil {
+	st = d.ensureCanaryBaseline(ctx, opt, project, st)
+	if err := d.runMetricsGateWithRollback(ctx, opt, "promote", st); err != nil {
 		return err
 	}
 
@@ -546,7 +564,7 @@ func missingIDs(expected []string, current map[string]struct{}) []string {
 	return out
 }
 
-func (d *Deployer) runMetricsGateWithRollback(ctx context.Context, opt Options, stage string) error {
+func (d *Deployer) runMetricsGateWithRollback(ctx context.Context, opt Options, stage string, st state.DeploymentState) error {
 	if !opt.Metrics.Enabled {
 		return nil
 	}
@@ -579,12 +597,14 @@ func (d *Deployer) runMetricsGateWithRollback(ctx context.Context, opt Options, 
 		return fmt.Errorf("metrics analysis failed during canary %s: %w; rollback applied", stage, err)
 	}
 
+	lifetimeResult, lifetimeSince := d.buildCanaryLifetimeSummary(ctx, opt, st, targetService)
+
 	switch result.Verdict {
 	case metricsgate.VerdictPass:
-		d.log.Infof("%s", formatCanaryResultReport(opt.Weight, result, "OK -> keeping canary at current weight"))
+		d.log.Infof("%s", formatCanaryResultReport(opt.Weight, result, "OK -> keeping canary at current weight", lifetimeResult, lifetimeSince))
 		return nil
 	case metricsgate.VerdictInsufficientData:
-		d.log.Warnf("%s", formatCanaryResultReport(opt.Weight, result, "WARN -> not enough traffic for strict decision"))
+		d.log.Warnf("%s", formatCanaryResultReport(opt.Weight, result, "WARN -> not enough traffic for strict decision", lifetimeResult, lifetimeSince))
 		return nil
 	default:
 		rbErr := d.rollback(ctx, Options{
@@ -592,7 +612,7 @@ func (d *Deployer) runMetricsGateWithRollback(ctx context.Context, opt Options, 
 			TraefikConfigFile: opt.TraefikConfigFile,
 			AutoCleanup:       opt.AutoCleanup,
 		})
-		d.log.Warnf("%s", formatCanaryResultReport(opt.Weight, result, "ROLLBACK -> new=0%%, old=100%%"))
+		d.log.Warnf("%s", formatCanaryResultReport(opt.Weight, result, "ROLLBACK -> new=0%%, old=100%%", lifetimeResult, lifetimeSince))
 		if rbErr != nil {
 			return fmt.Errorf("canary metrics gate failed after %s (%s); rollback also failed: %w", stage, strings.Join(result.Reasons, "; "), rbErr)
 		}
@@ -600,19 +620,99 @@ func (d *Deployer) runMetricsGateWithRollback(ctx context.Context, opt Options, 
 	}
 }
 
+func (d *Deployer) captureServiceSnapshot(ctx context.Context, opt Options, targetService string) (*metricsgate.Snapshot, error) {
+	s, err := metricsgate.CaptureSnapshot(ctx, &http.Client{Timeout: 10 * time.Second}, opt.Metrics.URL, []string{targetService})
+	if err != nil {
+		return nil, err
+	}
+	return &s, nil
+}
+
+func canarySnapshotWentBackwards(start metricsgate.Snapshot, end metricsgate.Snapshot) bool {
+	return end.Requests2xx < start.Requests2xx ||
+		end.Requests4xx < start.Requests4xx ||
+		end.Requests5xx < start.Requests5xx
+}
+
+func (d *Deployer) ensureCanaryBaseline(ctx context.Context, opt Options, project string, st state.DeploymentState) state.DeploymentState {
+	if st.NewStats != nil {
+		return st
+	}
+	snapshot, err := d.captureServiceSnapshot(ctx, opt, canaryMetricServiceName(st.Service, "new"))
+	if err != nil {
+		d.log.Warnf("==> Unable to capture canary baseline metrics: %v", err)
+		return st
+	}
+	st.NewStats = &state.MetricsBaseline{
+		CapturedAt:    time.Now().UTC(),
+		Requests2xx:   snapshot.Requests2xx,
+		Requests4xx:   snapshot.Requests4xx,
+		Requests5xx:   snapshot.Requests5xx,
+		DurationSum:   snapshot.DurationSum,
+		DurationCount: snapshot.DurationCount,
+	}
+	if saveErr := d.store.Save(project, st); saveErr != nil {
+		d.log.Warnf("==> Unable to persist canary baseline metrics: %v", saveErr)
+	}
+	return st
+}
+
+func (d *Deployer) buildCanaryLifetimeSummary(ctx context.Context, opt Options, st state.DeploymentState, targetService string) (*metricsgate.Result, string) {
+	if st.NewStats == nil {
+		return nil, ""
+	}
+	current, err := d.captureServiceSnapshot(ctx, opt, targetService)
+	if err != nil {
+		d.log.Warnf("==> Unable to capture lifetime snapshot for canary summary: %v", err)
+		return nil, ""
+	}
+	start := metricsgate.Snapshot{
+		Requests2xx:   st.NewStats.Requests2xx,
+		Requests4xx:   st.NewStats.Requests4xx,
+		Requests5xx:   st.NewStats.Requests5xx,
+		DurationSum:   st.NewStats.DurationSum,
+		DurationCount: st.NewStats.DurationCount,
+	}
+	end := metricsgate.Snapshot{
+		Requests2xx:   current.Requests2xx,
+		Requests4xx:   current.Requests4xx,
+		Requests5xx:   current.Requests5xx,
+		DurationSum:   current.DurationSum,
+		DurationCount: current.DurationCount,
+	}
+	if canarySnapshotWentBackwards(start, end) {
+		d.log.Warn("==> Canary lifetime baseline appears reset (Traefik counters moved backwards); lifetime summary unavailable")
+		return nil, ""
+	}
+	res := metricsgate.EvaluateFromSnapshots(opt.Metrics, start, end, 2)
+	return &res, st.NewStats.CapturedAt.Format(time.RFC3339)
+}
+
 func canaryMetricServiceName(service string, side string) string {
 	return service + "_" + side
 }
 
-func formatCanaryResultReport(weight int, result metricsgate.Result, decision string) string {
+func formatCanaryResultReport(weight int, result metricsgate.Result, decision string, lifetime *metricsgate.Result, lifetimeSince string) string {
 	status := strings.ToUpper(string(result.Verdict))
 	reasonLine := ""
 	if len(result.Reasons) > 0 {
 		reasonLine = fmt.Sprintf("\nReason: %s", strings.Join(result.Reasons, "; "))
 	}
+	lifetimeLine := ""
+	if lifetime != nil {
+		lifetimeLine = fmt.Sprintf(
+			"\n\nLifetime (since %s):\n  Traffic: %.0f requests\n  2xx: %.2f%%\n  4xx: %.2f%%\n  5xx: %.2f%%\n  Latency: %.2fms",
+			lifetimeSince,
+			lifetime.TotalRequests,
+			lifetime.Ratio2xx*100,
+			lifetime.Ratio4xx*100,
+			lifetime.Ratio5xx*100,
+			lifetime.MeanLatencyMS,
+		)
+	}
 
 	return fmt.Sprintf(
-		"==> Deployment Result (canary %d%%)\nStatus: %s%s\nTraffic: %.0f requests (%d samples)\n\nNew Version:\n  2xx: %.2f%%\n  4xx: %.2f%%\n  5xx: %.2f%%\n  Latency: %.2fms\n\nDecision: %s",
+		"==> Deployment Result (canary %d%%)\nStatus: %s%s\nMode: WINDOW\nTraffic: %.0f requests (%d samples)\n\nNew Version:\n  2xx: %.2f%%\n  4xx: %.2f%%\n  5xx: %.2f%%\n  Latency: %.2fms%s\n\nDecision: %s",
 		weight,
 		status,
 		reasonLine,
@@ -622,6 +722,7 @@ func formatCanaryResultReport(weight int, result metricsgate.Result, decision st
 		result.Ratio4xx*100,
 		result.Ratio5xx*100,
 		result.MeanLatencyMS,
+		lifetimeLine,
 		decision,
 	)
 }

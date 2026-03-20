@@ -47,6 +47,7 @@ type DeploymentState struct {
 	CleanupAt  *time.Time       `json:"cleanupAt,omitempty"`
 	QA         *QAModes         `json:"qa,omitempty"`
 	GreenStats *MetricsBaseline `json:"greenStats,omitempty"`
+	NewStats   *MetricsBaseline `json:"newStats,omitempty"`
 }
 
 func (s DeploymentState) Validate() error {

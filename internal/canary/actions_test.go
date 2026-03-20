@@ -166,6 +166,70 @@ func TestDeployReusesExistingCanaryStateWithoutScaling(t *testing.T) {
 	}
 }
 
+func TestDeployWithAnalyzeUsesCanaryLifetimeStats(t *testing.T) {
+	t.Parallel()
+
+	store := state.NewStore(t.TempDir())
+	st := state.DeploymentState{
+		Service:   "api",
+		Strategy:  state.StrategyCanary,
+		Old:       []string{"old-id"},
+		New:       []string{"new-id"},
+		Weight:    30,
+		CreatedAt: time.Now().UTC(),
+		NewStats: &state.MetricsBaseline{
+			CapturedAt:    time.Now().UTC(),
+			Requests2xx:   10,
+			Requests4xx:   0,
+			Requests5xx:   0,
+			DurationSum:   1,
+			DurationCount: 10,
+		},
+	}
+	if err := store.Save("project", st); err != nil {
+		t.Fatalf("save state: %v", err)
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		fmt.Fprintln(w, `traefik_service_requests_total{code="200",service="api_new@file"} 20`)
+	}))
+	defer server.Close()
+
+	compose := &composeMock{
+		idsByService: map[string][]string{
+			"api": {"old-id", "new-id"},
+		},
+	}
+	deployer := NewDeployer(logrus.New(), compose, &dockerMock{
+		labels: map[string]string{
+			"traefik.http.routers.api.rule":                      "Host(`example.com`)",
+			"traefik.http.services.api.loadbalancer.server.port": "8080",
+		},
+	}, store)
+
+	err := deployer.deploy(context.Background(), Options{
+		Service:           "api",
+		Weight:            30,
+		TraefikConfigFile: t.TempDir() + "/dynamic.yml",
+		Metrics: metricsgate.Config{
+			Enabled:          true,
+			URL:              server.URL,
+			Window:           2 * time.Second,
+			Interval:         10 * time.Millisecond,
+			MinRequests:      0,
+			Max5xxRatio:      0.05,
+			Max4xxRatio:      -1,
+			MaxMeanLatencyMS: -1,
+		},
+	})
+	if err != nil {
+		t.Fatalf("deploy failed: %v", err)
+	}
+	if compose.scaleCalls != 0 {
+		t.Fatalf("expected no scaling when canary state exists, got %d scale calls", compose.scaleCalls)
+	}
+}
+
 func TestDeployFailsSafeOnStateDrift(t *testing.T) {
 	t.Parallel()
 
@@ -221,13 +285,10 @@ func TestPromoteAnalyzeFailureTriggersRollback(t *testing.T) {
 	call := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		call++
-		if call == 1 {
-			fmt.Fprintln(w, `traefik_service_requests_total{code="200",service="api_new@file"} 100`)
-			fmt.Fprintln(w, `traefik_service_requests_total{code="500",service="api_new@file"} 1`)
-			return
-		}
-		fmt.Fprintln(w, `traefik_service_requests_total{code="200",service="api_new@file"} 120`)
-		fmt.Fprintln(w, `traefik_service_requests_total{code="500",service="api_new@file"} 20`)
+		ok := 100 + call
+		fail := 1 + (call * 5)
+		fmt.Fprintf(w, "traefik_service_requests_total{code=\"200\",service=\"api_new@file\"} %d\n", ok)
+		fmt.Fprintf(w, "traefik_service_requests_total{code=\"500\",service=\"api_new@file\"} %d\n", fail)
 	}))
 	defer server.Close()
 
@@ -246,7 +307,7 @@ func TestPromoteAnalyzeFailureTriggersRollback(t *testing.T) {
 			URL:              server.URL,
 			Window:           40 * time.Millisecond,
 			Interval:         10 * time.Millisecond,
-			MinRequests:      5,
+			MinRequests:      1,
 			Max5xxRatio:      0.05,
 			Max4xxRatio:      -1,
 			MaxMeanLatencyMS: -1,
