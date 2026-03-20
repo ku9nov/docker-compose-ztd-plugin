@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"strings"
 	"time"
@@ -11,6 +12,7 @@ import (
 	"github.com/sirupsen/logrus"
 
 	"github.com/ku9nov/docker-compose-ztd-plugin/internal/compose"
+	"github.com/ku9nov/docker-compose-ztd-plugin/internal/metricsgate"
 	"github.com/ku9nov/docker-compose-ztd-plugin/internal/safeguard"
 	"github.com/ku9nov/docker-compose-ztd-plugin/internal/state"
 	"github.com/ku9nov/docker-compose-ztd-plugin/internal/traefik"
@@ -32,6 +34,7 @@ type Options struct {
 	HealthTimeout     int
 	NoHealthTimeout   int
 	WaitAfterHealthy  int
+	Metrics           metricsgate.Config
 }
 
 type dockerOps interface {
@@ -76,6 +79,14 @@ func (d *Deployer) deploy(ctx context.Context, opt Options) (err error) {
 	if err == nil {
 		if err := d.validateStateContainersArePresent(ctx, opt, existingState); err != nil {
 			return err
+		}
+		if opt.Metrics.Enabled {
+			d.log.Infof("==> Blue-green cycle is already active for service '%s' (key: %s). Running analysis-only for existing green.", opt.Service, project)
+			if d.runLifetimeGreenMetricsGate(ctx, opt, existingState, "observe") {
+				return nil
+			}
+			d.runMetricsGate(ctx, opt, blueGreenMetricServiceName(opt.Service, state.ColorGreen), "observe")
+			return nil
 		}
 		return fmt.Errorf("blue-green state for service %s already exists (key: %s); finish current cycle with switch/cleanup before starting a new deploy", opt.Service, project)
 	}
@@ -192,6 +203,22 @@ func (d *Deployer) deploy(ctx context.Context, opt Options) (err error) {
 	}); err != nil {
 		return err
 	}
+	if baseline, baselineErr := d.captureServiceSnapshot(ctx, opt, blueGreenMetricServiceName(opt.Service, state.ColorGreen)); baselineErr != nil {
+		d.log.Warnf("==> Unable to capture green baseline metrics: %v", baselineErr)
+	} else {
+		currentState.GreenStats = &state.MetricsBaseline{
+			CapturedAt:    time.Now().UTC(),
+			Requests2xx:   baseline.Requests2xx,
+			Requests4xx:   baseline.Requests4xx,
+			Requests5xx:   baseline.Requests5xx,
+			DurationSum:   baseline.DurationSum,
+			DurationCount: baseline.DurationCount,
+		}
+		if saveErr := d.store.Save(stateKey, currentState); saveErr != nil {
+			d.log.Warnf("==> Unable to persist green baseline metrics: %v", saveErr)
+		}
+	}
+	d.runMetricsGate(ctx, opt, blueGreenMetricServiceName(opt.Service, state.ColorGreen), "deploy")
 
 	guard.Disarm()
 	d.log.Infof("==> Blue-green deploy ready. Blue active, green waiting for switch.")
@@ -303,4 +330,120 @@ func missingIDs(expected []string, current map[string]struct{}) []string {
 		}
 	}
 	return out
+}
+
+func (d *Deployer) runMetricsGate(ctx context.Context, opt Options, targetService string, stage string) {
+	if !opt.Metrics.Enabled {
+		return
+	}
+
+	d.log.Infof("==> Metrics analysis started (blue-green stage=%s, window=%s, interval=%s)", stage, opt.Metrics.Window, opt.Metrics.Interval)
+	result, err := metricsgate.AnalyzeWithProgress(
+		ctx,
+		&http.Client{Timeout: 10 * time.Second},
+		opt.Metrics,
+		[]string{targetService},
+		func(p metricsgate.Progress) {
+			elapsed := p.Elapsed
+			if elapsed > p.Window {
+				elapsed = p.Window
+			}
+			percent := int(float64(elapsed) / float64(p.Window) * 100)
+			d.log.Infof("==> Metrics analysis progress: %d%% (%s/%s), samples=%d, pollErrors=%d", percent, elapsed.Truncate(time.Second), p.Window, p.SuccessfulSamples, p.FailedPolls)
+		},
+	)
+	if err != nil {
+		d.log.Warnf("==> Blue-green metrics gate failed to run after %s: %v", stage, err)
+		return
+	}
+	switch result.Verdict {
+	case metricsgate.VerdictPass:
+		d.log.Infof("%s", formatBlueGreenResultReport(result, "OK -> keep current active color"))
+	case metricsgate.VerdictInsufficientData:
+		d.log.Warnf("%s", formatBlueGreenResultReport(result, "WARN -> not enough traffic for strict decision"))
+	default:
+		d.log.Warnf("%s", formatBlueGreenResultReport(result, "WARN -> manual decision required"))
+	}
+}
+
+func blueGreenMetricServiceName(service string, color string) string {
+	return service + "-" + color
+}
+
+func (d *Deployer) runLifetimeGreenMetricsGate(ctx context.Context, opt Options, st state.DeploymentState, stage string) bool {
+	if st.GreenStats == nil {
+		d.log.Warn("==> Green lifetime baseline is missing; falling back to window analysis")
+		return false
+	}
+	targetService := blueGreenMetricServiceName(st.Service, state.ColorGreen)
+	current, err := d.captureServiceSnapshot(ctx, opt, targetService)
+	if err != nil {
+		d.log.Warnf("==> Unable to capture current green metrics snapshot: %v", err)
+		return false
+	}
+	start := metricsgate.Snapshot{
+		Requests2xx:   st.GreenStats.Requests2xx,
+		Requests4xx:   st.GreenStats.Requests4xx,
+		Requests5xx:   st.GreenStats.Requests5xx,
+		DurationSum:   st.GreenStats.DurationSum,
+		DurationCount: st.GreenStats.DurationCount,
+	}
+	end := metricsgate.Snapshot{
+		Requests2xx:   current.Requests2xx,
+		Requests4xx:   current.Requests4xx,
+		Requests5xx:   current.Requests5xx,
+		DurationSum:   current.DurationSum,
+		DurationCount: current.DurationCount,
+	}
+	if snapshotWentBackwards(start, end) {
+		d.log.Warn("==> Green lifetime baseline appears reset (Traefik counters moved backwards); falling back to window analysis")
+		return false
+	}
+
+	d.log.Infof("==> Lifetime metrics analysis started (blue-green stage=%s, since=%s)", stage, st.GreenStats.CapturedAt.Format(time.RFC3339))
+	result := metricsgate.EvaluateFromSnapshots(opt.Metrics, start, end, 2)
+	switch result.Verdict {
+	case metricsgate.VerdictPass:
+		d.log.Infof("%s", formatBlueGreenResultReport(result, "OK -> keep current active color"))
+	case metricsgate.VerdictInsufficientData:
+		d.log.Warnf("%s", formatBlueGreenResultReport(result, "WARN -> not enough traffic for strict decision"))
+	default:
+		d.log.Warnf("%s", formatBlueGreenResultReport(result, "WARN -> manual decision required"))
+	}
+	return true
+}
+
+func (d *Deployer) captureServiceSnapshot(ctx context.Context, opt Options, targetService string) (*metricsgate.Snapshot, error) {
+	s, err := metricsgate.CaptureSnapshot(ctx, &http.Client{Timeout: 10 * time.Second}, opt.Metrics.URL, []string{targetService})
+	if err != nil {
+		return nil, err
+	}
+	return &s, nil
+}
+
+func snapshotWentBackwards(start metricsgate.Snapshot, end metricsgate.Snapshot) bool {
+	return end.Requests2xx < start.Requests2xx ||
+		end.Requests4xx < start.Requests4xx ||
+		end.Requests5xx < start.Requests5xx
+}
+
+func formatBlueGreenResultReport(result metricsgate.Result, decision string) string {
+	status := strings.ToUpper(string(result.Verdict))
+	reasonLine := ""
+	if len(result.Reasons) > 0 {
+		reasonLine = fmt.Sprintf("\nReason: %s", strings.Join(result.Reasons, "; "))
+	}
+
+	return fmt.Sprintf(
+		"==> Deployment Result (blue-green)\nStatus: %s%s\nTraffic: %.0f requests (%d samples)\n\nNew Version:\n  2xx: %.2f%%\n  4xx: %.2f%%\n  5xx: %.2f%%\n  Latency: %.2fms\n\nDecision: %s",
+		status,
+		reasonLine,
+		result.TotalRequests,
+		result.Samples,
+		result.Ratio2xx*100,
+		result.Ratio4xx*100,
+		result.Ratio5xx*100,
+		result.MeanLatencyMS,
+		decision,
+	)
 }

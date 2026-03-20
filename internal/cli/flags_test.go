@@ -252,3 +252,44 @@ func TestParse_AutoCleanupAllowsCanaryRollback(t *testing.T) {
 		t.Fatalf("expected auto cleanup 10m, got %s", cfg.AutoCleanup)
 	}
 }
+
+func TestParse_AnalyzeFlags(t *testing.T) {
+	cfg, err := Parse([]string{
+		"--strategy=canary",
+		"--analyze",
+		"--metrics-url=http://localhost:8080/metrics",
+		"--analyze-window=45s",
+		"--analyze-interval=5s",
+		"--min-requests=120",
+		"--max-5xx-ratio=0.02",
+		"--max-4xx-ratio=0.10",
+		"--max-mean-latency-ms=250",
+		"api",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !cfg.Analyze {
+		t.Fatal("expected analyze enabled")
+	}
+	if cfg.AnalyzeWindow != 45*time.Second || cfg.AnalyzeInterval != 5*time.Second {
+		t.Fatalf("unexpected analyze timing config: window=%s interval=%s", cfg.AnalyzeWindow, cfg.AnalyzeInterval)
+	}
+	if cfg.AnalyzeMinRequests != 120 {
+		t.Fatalf("expected min requests 120, got %d", cfg.AnalyzeMinRequests)
+	}
+	if cfg.AnalyzeMax5xxRatio != 0.02 || cfg.AnalyzeMax4xxRatio != 0.10 || cfg.AnalyzeMaxLatencyMS != 250 {
+		t.Fatalf("unexpected analyze thresholds: %+v", cfg)
+	}
+}
+
+func TestParse_AnalyzeRequiresBlueGreenOrCanary(t *testing.T) {
+	_, err := Parse([]string{
+		"--strategy=rolling",
+		"--analyze",
+		"api",
+	})
+	if err == nil {
+		t.Fatal("expected parse error")
+	}
+}

@@ -15,6 +15,7 @@ import (
 	"github.com/ku9nov/docker-compose-ztd-plugin/internal/compose"
 	"github.com/ku9nov/docker-compose-ztd-plugin/internal/configio"
 	"github.com/ku9nov/docker-compose-ztd-plugin/internal/docker"
+	"github.com/ku9nov/docker-compose-ztd-plugin/internal/metricsgate"
 	"github.com/ku9nov/docker-compose-ztd-plugin/internal/rollout"
 	"github.com/ku9nov/docker-compose-ztd-plugin/internal/state"
 	"github.com/ku9nov/docker-compose-ztd-plugin/internal/traefik"
@@ -109,6 +110,16 @@ func (r *Runner) Run(ctx context.Context, cfg cli.Config) error {
 			HealthTimeout:     cfg.HealthcheckTimeout,
 			NoHealthTimeout:   cfg.NoHealthcheckTimeout,
 			WaitAfterHealthy:  cfg.WaitAfterHealthy,
+			Metrics: metricsgate.Config{
+				Enabled:          cfg.Analyze,
+				URL:              cfg.MetricsURL,
+				Window:           cfg.AnalyzeWindow,
+				Interval:         cfg.AnalyzeInterval,
+				MinRequests:      cfg.AnalyzeMinRequests,
+				Max5xxRatio:      cfg.AnalyzeMax5xxRatio,
+				Max4xxRatio:      cfg.AnalyzeMax4xxRatio,
+				MaxMeanLatencyMS: cfg.AnalyzeMaxLatencyMS,
+			},
 		})
 	case cli.StrategyCanary:
 		return canaryDeployer.Run(ctx, canary.Options{
@@ -122,6 +133,16 @@ func (r *Runner) Run(ctx context.Context, cfg cli.Config) error {
 			HealthTimeout:     cfg.HealthcheckTimeout,
 			NoHealthTimeout:   cfg.NoHealthcheckTimeout,
 			WaitAfterHealthy:  cfg.WaitAfterHealthy,
+			Metrics: metricsgate.Config{
+				Enabled:          cfg.Analyze,
+				URL:              cfg.MetricsURL,
+				Window:           cfg.AnalyzeWindow,
+				Interval:         cfg.AnalyzeInterval,
+				MinRequests:      cfg.AnalyzeMinRequests,
+				Max5xxRatio:      cfg.AnalyzeMax5xxRatio,
+				Max4xxRatio:      cfg.AnalyzeMax4xxRatio,
+				MaxMeanLatencyMS: cfg.AnalyzeMaxLatencyMS,
+			},
 		})
 	default:
 		return fmt.Errorf("unsupported strategy: %s", cfg.Strategy)

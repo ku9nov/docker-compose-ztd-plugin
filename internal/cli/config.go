@@ -10,6 +10,13 @@ const (
 	DefaultProxyType            = "traefik"
 	DefaultStrategy             = StrategyRolling
 	DefaultCanaryWeight         = 10
+	DefaultMetricsURL           = "http://localhost:8080/metrics"
+	DefaultAnalyzeWindow        = 30 * time.Second
+	DefaultAnalyzeInterval      = 5 * time.Second
+	DefaultAnalyzeMinRequests   = 50
+	DefaultAnalyzeMax5xxRatio   = 0.05
+	DefaultAnalyzeMax4xxRatio   = -1.0
+	DefaultAnalyzeMaxLatencyMS  = -1.0
 )
 
 const (
@@ -47,4 +54,12 @@ type Config struct {
 	Service              string
 	UpDetached           bool
 	ShowHelp             bool
+	Analyze              bool
+	MetricsURL           string
+	AnalyzeWindow        time.Duration
+	AnalyzeInterval      time.Duration
+	AnalyzeMinRequests   int
+	AnalyzeMax5xxRatio   float64
+	AnalyzeMax4xxRatio   float64
+	AnalyzeMaxLatencyMS  float64
 }

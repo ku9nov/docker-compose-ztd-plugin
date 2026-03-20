@@ -44,6 +44,14 @@ Options:
       --weight N              canary mode (default: %d)
       --to COLOR              switch action target color (blue|green)
       --auto-cleanup DURATION switch/promote/rollback actions only (example: 10m, 1h30m)
+      --analyze               Enable runtime metrics analysis for blue-green/canary
+      --metrics-url URL       Traefik metrics endpoint (default: %s)
+      --analyze-window DUR    Observation window for metrics delta (default: %s)
+      --analyze-interval DUR  Poll interval during analysis window (default: %s)
+      --min-requests N        Minimum request count for verdict (default: %d)
+      --max-5xx-ratio N       Maximum allowed 5xx ratio [0..1] (default: %.2f)
+      --max-4xx-ratio N       Maximum allowed 4xx ratio [0..1], -1 disables (default: %.2f)
+      --max-mean-latency-ms N Maximum allowed mean latency in milliseconds, -1 disables (default: %.2f)
 
-`, DefaultHealthcheckTimeout, DefaultNoHealthcheckTimeout, DefaultStrategy, DefaultTraefikConfig, DefaultCanaryWeight)
+`, DefaultHealthcheckTimeout, DefaultNoHealthcheckTimeout, DefaultStrategy, DefaultTraefikConfig, DefaultCanaryWeight, DefaultMetricsURL, DefaultAnalyzeWindow, DefaultAnalyzeInterval, DefaultAnalyzeMinRequests, DefaultAnalyzeMax5xxRatio, DefaultAnalyzeMax4xxRatio, DefaultAnalyzeMaxLatencyMS)
 }

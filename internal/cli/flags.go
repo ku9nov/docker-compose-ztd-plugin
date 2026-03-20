@@ -16,6 +16,13 @@ func Parse(rawArgs []string) (Config, error) {
 		ProxyType:            DefaultProxyType,
 		Strategy:             DefaultStrategy,
 		Weight:               DefaultCanaryWeight,
+		MetricsURL:           DefaultMetricsURL,
+		AnalyzeWindow:        DefaultAnalyzeWindow,
+		AnalyzeInterval:      DefaultAnalyzeInterval,
+		AnalyzeMinRequests:   DefaultAnalyzeMinRequests,
+		AnalyzeMax5xxRatio:   DefaultAnalyzeMax5xxRatio,
+		AnalyzeMax4xxRatio:   DefaultAnalyzeMax4xxRatio,
+		AnalyzeMaxLatencyMS:  DefaultAnalyzeMaxLatencyMS,
 	}
 	weightExplicitlySet := false
 	strategyExplicitlySet := false
@@ -149,6 +156,66 @@ func Parse(rawArgs []string) (Config, error) {
 			}
 			cfg.SwitchTo = value
 			args = args[consumed:]
+		case token == "--analyze":
+			cfg.Analyze = true
+			args = args[1:]
+		case token == "--metrics-url" || strings.HasPrefix(token, "--metrics-url="):
+			value, consumed, err := parseStringFlag(args, "--metrics-url")
+			if err != nil {
+				return cfg, err
+			}
+			cfg.MetricsURL = value
+			args = args[consumed:]
+		case token == "--analyze-window" || strings.HasPrefix(token, "--analyze-window="):
+			value, consumed, err := parseStringFlag(args, "--analyze-window")
+			if err != nil {
+				return cfg, err
+			}
+			d, err := time.ParseDuration(value)
+			if err != nil {
+				return cfg, fmt.Errorf("invalid --analyze-window: %w", err)
+			}
+			cfg.AnalyzeWindow = d
+			args = args[consumed:]
+		case token == "--analyze-interval" || strings.HasPrefix(token, "--analyze-interval="):
+			value, consumed, err := parseStringFlag(args, "--analyze-interval")
+			if err != nil {
+				return cfg, err
+			}
+			d, err := time.ParseDuration(value)
+			if err != nil {
+				return cfg, fmt.Errorf("invalid --analyze-interval: %w", err)
+			}
+			cfg.AnalyzeInterval = d
+			args = args[consumed:]
+		case token == "--min-requests" || strings.HasPrefix(token, "--min-requests="):
+			value, consumed, err := parseIntFlag(args, "--min-requests")
+			if err != nil {
+				return cfg, err
+			}
+			cfg.AnalyzeMinRequests = value
+			args = args[consumed:]
+		case token == "--max-5xx-ratio" || strings.HasPrefix(token, "--max-5xx-ratio="):
+			value, consumed, err := parseFloatFlag(args, "--max-5xx-ratio")
+			if err != nil {
+				return cfg, err
+			}
+			cfg.AnalyzeMax5xxRatio = value
+			args = args[consumed:]
+		case token == "--max-4xx-ratio" || strings.HasPrefix(token, "--max-4xx-ratio="):
+			value, consumed, err := parseFloatFlag(args, "--max-4xx-ratio")
+			if err != nil {
+				return cfg, err
+			}
+			cfg.AnalyzeMax4xxRatio = value
+			args = args[consumed:]
+		case token == "--max-mean-latency-ms" || strings.HasPrefix(token, "--max-mean-latency-ms="):
+			value, consumed, err := parseFloatFlag(args, "--max-mean-latency-ms")
+			if err != nil {
+				return cfg, err
+			}
+			cfg.AnalyzeMaxLatencyMS = value
+			args = args[consumed:]
 		case token == "--auto-cleanup" || strings.HasPrefix(token, "--auto-cleanup="):
 			value, consumed, err := parseStringFlag(args, "--auto-cleanup")
 			if err != nil {
@@ -234,6 +301,18 @@ func parseIntFlag(args []string, flag string) (int, int, error) {
 	return n, consumed, nil
 }
 
+func parseFloatFlag(args []string, flag string) (float64, int, error) {
+	raw, consumed, err := parseStringFlag(args, flag)
+	if err != nil {
+		return 0, 0, err
+	}
+	n, err := strconv.ParseFloat(raw, 64)
+	if err != nil {
+		return 0, 0, fmt.Errorf("invalid %s: %w", flag, err)
+	}
+	return n, consumed, nil
+}
+
 func parseInlineValue(token string, flag string) (string, bool) {
 	prefix := flag + "="
 	if strings.HasPrefix(token, prefix) {
@@ -288,6 +367,28 @@ func validateStrategy(cfg *Config, weightExplicitlySet bool, strategyExplicitlyS
 
 	if cfg.AutoCleanup > 0 && cfg.Action != ActionSwitch && cfg.Action != ActionPromote && cfg.Action != ActionRollback {
 		return fmt.Errorf("--auto-cleanup requires action %s, %s or %s", ActionSwitch, ActionPromote, ActionRollback)
+	}
+
+	if cfg.Analyze && cfg.Strategy != StrategyBlueGreen && cfg.Strategy != StrategyCanary {
+		return fmt.Errorf("--analyze requires --strategy=%s or --strategy=%s", StrategyBlueGreen, StrategyCanary)
+	}
+	if cfg.AnalyzeWindow <= 0 {
+		return fmt.Errorf("--analyze-window must be greater than 0")
+	}
+	if cfg.AnalyzeInterval <= 0 {
+		return fmt.Errorf("--analyze-interval must be greater than 0")
+	}
+	if cfg.AnalyzeMinRequests < 0 {
+		return fmt.Errorf("--min-requests must be greater than or equal to 0")
+	}
+	if cfg.AnalyzeMax5xxRatio < 0 || cfg.AnalyzeMax5xxRatio > 1 {
+		return fmt.Errorf("--max-5xx-ratio must be in range [0..1]")
+	}
+	if (cfg.AnalyzeMax4xxRatio < 0 && cfg.AnalyzeMax4xxRatio != -1) || cfg.AnalyzeMax4xxRatio > 1 {
+		return fmt.Errorf("--max-4xx-ratio must be in range [0..1] or -1 to disable")
+	}
+	if cfg.AnalyzeMaxLatencyMS != -1 && cfg.AnalyzeMaxLatencyMS <= 0 {
+		return fmt.Errorf("--max-mean-latency-ms must be greater than 0 or -1 to disable")
 	}
 
 	return nil

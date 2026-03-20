@@ -2,10 +2,14 @@ package bluegreen
 
 import (
 	"context"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/ku9nov/docker-compose-ztd-plugin/internal/metricsgate"
 	"github.com/sirupsen/logrus"
 
 	"github.com/ku9nov/docker-compose-ztd-plugin/internal/state"
@@ -55,6 +59,14 @@ func TestSwitchTrafficUpdatesState(t *testing.T) {
 		Green:     []string{"green-id"},
 		Active:    state.ColorBlue,
 		CreatedAt: time.Now().UTC(),
+		GreenStats: &state.MetricsBaseline{
+			CapturedAt:    time.Now().UTC(),
+			Requests2xx:   10,
+			Requests4xx:   0,
+			Requests5xx:   0,
+			DurationSum:   1,
+			DurationCount: 10,
+		},
 	}
 	if err := store.Save("project", st); err != nil {
 		t.Fatalf("save state: %v", err)
@@ -143,6 +155,14 @@ func TestDeployBlockedWhenBlueGreenStateExists(t *testing.T) {
 		Green:     []string{"green-id"},
 		Active:    state.ColorBlue,
 		CreatedAt: time.Now().UTC(),
+		GreenStats: &state.MetricsBaseline{
+			CapturedAt:    time.Now().UTC(),
+			Requests2xx:   10,
+			Requests4xx:   0,
+			Requests5xx:   0,
+			DurationSum:   1,
+			DurationCount: 10,
+		},
 	}
 	if err := store.Save("project", st); err != nil {
 		t.Fatalf("save state: %v", err)
@@ -172,6 +192,79 @@ func TestDeployBlockedWhenBlueGreenStateExists(t *testing.T) {
 	}
 	if compose.scaleCalls != 0 {
 		t.Fatalf("expected no scale calls, got %d", compose.scaleCalls)
+	}
+}
+
+func TestDeployWithAnalyzeRunsObserveOnlyWhenStateExists(t *testing.T) {
+	t.Parallel()
+
+	store := state.NewStore(t.TempDir())
+	st := state.DeploymentState{
+		Service:   "api",
+		Strategy:  state.StrategyBlueGreen,
+		Blue:      []string{"blue-id"},
+		Green:     []string{"green-id"},
+		Active:    state.ColorBlue,
+		CreatedAt: time.Now().UTC(),
+		GreenStats: &state.MetricsBaseline{
+			CapturedAt:    time.Now().UTC(),
+			Requests2xx:   10,
+			Requests4xx:   0,
+			Requests5xx:   0,
+			DurationSum:   1,
+			DurationCount: 10,
+		},
+	}
+	if err := store.Save("project", st); err != nil {
+		t.Fatalf("save state: %v", err)
+	}
+
+	call := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		call++
+		if call == 1 {
+			fmt.Fprintln(w, `traefik_service_requests_total{code="200",service="api-green@file"} 10`)
+			return
+		}
+		fmt.Fprintln(w, `traefik_service_requests_total{code="200",service="api-green@file"} 20`)
+	}))
+	defer server.Close()
+
+	compose := &composeMock{
+		idsByService: map[string][]string{
+			"api": {"blue-id", "green-id"},
+		},
+	}
+	deployer := NewDeployer(logrus.New(), compose, &dockerMock{
+		labels: map[string]string{
+			"traefik.http.routers.api.rule":                      "Host(`example.com`)",
+			"traefik.http.services.api.loadbalancer.server.port": "8080",
+		},
+	}, store)
+
+	started := time.Now()
+	err := deployer.deploy(context.Background(), Options{
+		Service:           "api",
+		TraefikConfigFile: t.TempDir() + "/dynamic.yml",
+		Metrics: metricsgate.Config{
+			Enabled:          true,
+			URL:              server.URL,
+			Window:           2 * time.Second,
+			Interval:         10 * time.Millisecond,
+			MinRequests:      0,
+			Max5xxRatio:      0.05,
+			Max4xxRatio:      -1,
+			MaxMeanLatencyMS: -1,
+		},
+	})
+	if err != nil {
+		t.Fatalf("expected analyze-only mode to succeed, got: %v", err)
+	}
+	if compose.scaleCalls != 0 {
+		t.Fatalf("expected no scale calls in analyze-only mode, got %d", compose.scaleCalls)
+	}
+	if time.Since(started) > time.Second {
+		t.Fatal("expected lifetime analysis without waiting full window")
 	}
 }
 
@@ -212,5 +305,61 @@ func TestDeployFailsSafeOnBlueGreenStateDrift(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "state drift") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestSwitchTrafficAnalyzeFailureIsWarningOnly(t *testing.T) {
+	t.Parallel()
+
+	store := state.NewStore(t.TempDir())
+	st := state.DeploymentState{
+		Service:   "api",
+		Strategy:  state.StrategyBlueGreen,
+		Blue:      []string{"blue-id"},
+		Green:     []string{"green-id"},
+		Active:    state.ColorBlue,
+		CreatedAt: time.Now().UTC(),
+	}
+	if err := store.Save("project", st); err != nil {
+		t.Fatalf("save state: %v", err)
+	}
+
+	call := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		call++
+		if call == 1 {
+			fmt.Fprintln(w, `traefik_service_requests_total{code="200",service="api-green@file"} 100`)
+			fmt.Fprintln(w, `traefik_service_requests_total{code="500",service="api-green@file"} 1`)
+			return
+		}
+		fmt.Fprintln(w, `traefik_service_requests_total{code="200",service="api-green@file"} 110`)
+		fmt.Fprintln(w, `traefik_service_requests_total{code="500",service="api-green@file"} 20`)
+	}))
+	defer server.Close()
+
+	deployer := NewDeployer(logrus.New(), nil, &dockerMock{
+		labels: map[string]string{
+			"traefik.http.routers.api.rule":                      "Host(`example.com`)",
+			"traefik.http.services.api.loadbalancer.server.port": "8080",
+		},
+	}, store)
+
+	err := deployer.switchTraffic(context.Background(), Options{
+		Service:           "api",
+		SwitchTo:          state.ColorGreen,
+		TraefikConfigFile: t.TempDir() + "/dynamic.yml",
+		Metrics: metricsgate.Config{
+			Enabled:          true,
+			URL:              server.URL,
+			Window:           40 * time.Millisecond,
+			Interval:         10 * time.Millisecond,
+			MinRequests:      5,
+			Max5xxRatio:      0.05,
+			Max4xxRatio:      -1,
+			MaxMeanLatencyMS: -1,
+		},
+	})
+	if err != nil {
+		t.Fatalf("expected warning-only analyze behavior, got error: %v", err)
 	}
 }

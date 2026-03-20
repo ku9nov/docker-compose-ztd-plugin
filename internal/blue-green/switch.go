@@ -76,6 +76,7 @@ func (d *Deployer) switchTraffic(ctx context.Context, opt Options) error {
 	if err := d.store.Save(project, currentState); err != nil {
 		return err
 	}
+	d.runMetricsGate(ctx, opt, blueGreenMetricServiceName(currentState.Service, targetColor), "switch")
 
 	d.log.Infof("==> Switched service '%s' traffic to %s", currentState.Service, targetColor)
 	return nil

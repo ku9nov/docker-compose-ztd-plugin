@@ -24,19 +24,29 @@ type QAModes struct {
 	IP      string `json:"ip,omitempty"`
 }
 
+type MetricsBaseline struct {
+	CapturedAt    time.Time `json:"capturedAt"`
+	Requests2xx   float64   `json:"requests2xx"`
+	Requests4xx   float64   `json:"requests4xx"`
+	Requests5xx   float64   `json:"requests5xx"`
+	DurationSum   float64   `json:"durationSum"`
+	DurationCount float64   `json:"durationCount"`
+}
+
 type DeploymentState struct {
-	Service    string     `json:"service"`
-	Strategy   string     `json:"strategy"`
-	Blue       []string   `json:"blue"`
-	Green      []string   `json:"green"`
-	Active     string     `json:"active"`
-	Old        []string   `json:"old,omitempty"`
-	New        []string   `json:"new,omitempty"`
-	Weight     int        `json:"weight,omitempty"`
-	CreatedAt  time.Time  `json:"createdAt"`
-	SwitchedAt *time.Time `json:"switchedAt,omitempty"`
-	CleanupAt  *time.Time `json:"cleanupAt,omitempty"`
-	QA         *QAModes   `json:"qa,omitempty"`
+	Service    string           `json:"service"`
+	Strategy   string           `json:"strategy"`
+	Blue       []string         `json:"blue"`
+	Green      []string         `json:"green"`
+	Active     string           `json:"active"`
+	Old        []string         `json:"old,omitempty"`
+	New        []string         `json:"new,omitempty"`
+	Weight     int              `json:"weight,omitempty"`
+	CreatedAt  time.Time        `json:"createdAt"`
+	SwitchedAt *time.Time       `json:"switchedAt,omitempty"`
+	CleanupAt  *time.Time       `json:"cleanupAt,omitempty"`
+	QA         *QAModes         `json:"qa,omitempty"`
+	GreenStats *MetricsBaseline `json:"greenStats,omitempty"`
 }
 
 func (s DeploymentState) Validate() error {

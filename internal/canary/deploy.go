@@ -4,11 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"strings"
 	"time"
 
 	"github.com/ku9nov/docker-compose-ztd-plugin/internal/compose"
+	"github.com/ku9nov/docker-compose-ztd-plugin/internal/metricsgate"
 	"github.com/ku9nov/docker-compose-ztd-plugin/internal/safeguard"
 	"github.com/ku9nov/docker-compose-ztd-plugin/internal/state"
 	"github.com/ku9nov/docker-compose-ztd-plugin/internal/traefik"
@@ -29,6 +31,7 @@ type Options struct {
 	HealthTimeout     int
 	NoHealthTimeout   int
 	WaitAfterHealthy  int
+	Metrics           metricsgate.Config
 }
 
 type dockerOps interface {
@@ -180,6 +183,10 @@ func (d *Deployer) deploy(ctx context.Context, opt Options) (err error) {
 	}); err != nil {
 		return err
 	}
+	if err := d.runMetricsGateWithRollback(ctx, opt, "deploy"); err != nil {
+		guard.Disarm()
+		return err
+	}
 
 	guard.Disarm()
 	d.log.Infof("==> Canary deploy ready. old=%d%% new=%d%%", 100-opt.Weight, opt.Weight)
@@ -207,6 +214,9 @@ func (d *Deployer) deployFromExistingState(ctx context.Context, opt Options, pro
 		NewWeight:      opt.Weight,
 		HealthCheck:    hc,
 	}); err != nil {
+		return err
+	}
+	if err := d.runMetricsGateWithRollback(ctx, opt, "deploy"); err != nil {
 		return err
 	}
 
@@ -250,6 +260,9 @@ func (d *Deployer) promote(ctx context.Context, opt Options) error {
 		NewWeight:      opt.Weight,
 		HealthCheck:    hc,
 	}); err != nil {
+		return err
+	}
+	if err := d.runMetricsGateWithRollback(ctx, opt, "promote"); err != nil {
 		return err
 	}
 
@@ -531,4 +544,84 @@ func missingIDs(expected []string, current map[string]struct{}) []string {
 		}
 	}
 	return out
+}
+
+func (d *Deployer) runMetricsGateWithRollback(ctx context.Context, opt Options, stage string) error {
+	if !opt.Metrics.Enabled {
+		return nil
+	}
+
+	targetService := canaryMetricServiceName(opt.Service, "new")
+	d.log.Infof("==> Metrics analysis started (canary %d%%, stage=%s, window=%s, interval=%s)", opt.Weight, stage, opt.Metrics.Window, opt.Metrics.Interval)
+	result, err := metricsgate.AnalyzeWithProgress(
+		ctx,
+		&http.Client{Timeout: 10 * time.Second},
+		opt.Metrics,
+		[]string{targetService},
+		func(p metricsgate.Progress) {
+			elapsed := p.Elapsed
+			if elapsed > p.Window {
+				elapsed = p.Window
+			}
+			percent := int(float64(elapsed) / float64(p.Window) * 100)
+			d.log.Infof("==> Metrics analysis progress: %d%% (%s/%s), samples=%d, pollErrors=%d", percent, elapsed.Truncate(time.Second), p.Window, p.SuccessfulSamples, p.FailedPolls)
+		},
+	)
+	if err != nil {
+		rbErr := d.rollback(ctx, Options{
+			Service:           opt.Service,
+			TraefikConfigFile: opt.TraefikConfigFile,
+			AutoCleanup:       opt.AutoCleanup,
+		})
+		if rbErr != nil {
+			return fmt.Errorf("metrics analysis failed during canary %s (%v); rollback also failed: %w", stage, err, rbErr)
+		}
+		return fmt.Errorf("metrics analysis failed during canary %s: %w; rollback applied", stage, err)
+	}
+
+	switch result.Verdict {
+	case metricsgate.VerdictPass:
+		d.log.Infof("%s", formatCanaryResultReport(opt.Weight, result, "OK -> keeping canary at current weight"))
+		return nil
+	case metricsgate.VerdictInsufficientData:
+		d.log.Warnf("%s", formatCanaryResultReport(opt.Weight, result, "WARN -> not enough traffic for strict decision"))
+		return nil
+	default:
+		rbErr := d.rollback(ctx, Options{
+			Service:           opt.Service,
+			TraefikConfigFile: opt.TraefikConfigFile,
+			AutoCleanup:       opt.AutoCleanup,
+		})
+		d.log.Warnf("%s", formatCanaryResultReport(opt.Weight, result, "ROLLBACK -> new=0%%, old=100%%"))
+		if rbErr != nil {
+			return fmt.Errorf("canary metrics gate failed after %s (%s); rollback also failed: %w", stage, strings.Join(result.Reasons, "; "), rbErr)
+		}
+		return fmt.Errorf("canary metrics gate failed after %s (%s); rollback applied", stage, strings.Join(result.Reasons, "; "))
+	}
+}
+
+func canaryMetricServiceName(service string, side string) string {
+	return service + "_" + side
+}
+
+func formatCanaryResultReport(weight int, result metricsgate.Result, decision string) string {
+	status := strings.ToUpper(string(result.Verdict))
+	reasonLine := ""
+	if len(result.Reasons) > 0 {
+		reasonLine = fmt.Sprintf("\nReason: %s", strings.Join(result.Reasons, "; "))
+	}
+
+	return fmt.Sprintf(
+		"==> Deployment Result (canary %d%%)\nStatus: %s%s\nTraffic: %.0f requests (%d samples)\n\nNew Version:\n  2xx: %.2f%%\n  4xx: %.2f%%\n  5xx: %.2f%%\n  Latency: %.2fms\n\nDecision: %s",
+		weight,
+		status,
+		reasonLine,
+		result.TotalRequests,
+		result.Samples,
+		result.Ratio2xx*100,
+		result.Ratio4xx*100,
+		result.Ratio5xx*100,
+		result.MeanLatencyMS,
+		decision,
+	)
 }

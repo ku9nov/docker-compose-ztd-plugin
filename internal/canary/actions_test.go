@@ -2,9 +2,13 @@ package canary
 
 import (
 	"context"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
+	"github.com/ku9nov/docker-compose-ztd-plugin/internal/metricsgate"
 	"github.com/ku9nov/docker-compose-ztd-plugin/internal/state"
 	"github.com/sirupsen/logrus"
 )
@@ -195,5 +199,68 @@ func TestDeployFailsSafeOnStateDrift(t *testing.T) {
 		TraefikConfigFile: t.TempDir() + "/dynamic.yml",
 	}); err == nil {
 		t.Fatal("expected fail-safe error when state drifts from running containers")
+	}
+}
+
+func TestPromoteAnalyzeFailureTriggersRollback(t *testing.T) {
+	t.Parallel()
+
+	store := state.NewStore(t.TempDir())
+	st := state.DeploymentState{
+		Service:   "api",
+		Strategy:  state.StrategyCanary,
+		Old:       []string{"old-id"},
+		New:       []string{"new-id"},
+		Weight:    20,
+		CreatedAt: time.Now().UTC(),
+	}
+	if err := store.Save("project", st); err != nil {
+		t.Fatalf("save state: %v", err)
+	}
+
+	call := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		call++
+		if call == 1 {
+			fmt.Fprintln(w, `traefik_service_requests_total{code="200",service="api_new@file"} 100`)
+			fmt.Fprintln(w, `traefik_service_requests_total{code="500",service="api_new@file"} 1`)
+			return
+		}
+		fmt.Fprintln(w, `traefik_service_requests_total{code="200",service="api_new@file"} 120`)
+		fmt.Fprintln(w, `traefik_service_requests_total{code="500",service="api_new@file"} 20`)
+	}))
+	defer server.Close()
+
+	deployer := NewDeployer(logrus.New(), nil, &dockerMock{
+		labels: map[string]string{
+			"traefik.http.routers.api.rule":                      "Host(`example.com`)",
+			"traefik.http.services.api.loadbalancer.server.port": "8080",
+		},
+	}, store)
+	err := deployer.promote(context.Background(), Options{
+		Service:           "api",
+		Weight:            70,
+		TraefikConfigFile: t.TempDir() + "/dynamic.yml",
+		Metrics: metricsgate.Config{
+			Enabled:          true,
+			URL:              server.URL,
+			Window:           40 * time.Millisecond,
+			Interval:         10 * time.Millisecond,
+			MinRequests:      5,
+			Max5xxRatio:      0.05,
+			Max4xxRatio:      -1,
+			MaxMeanLatencyMS: -1,
+		},
+	})
+	if err == nil {
+		t.Fatal("expected promote to fail when metrics gate fails")
+	}
+
+	got, loadErr := store.Load("project")
+	if loadErr != nil {
+		t.Fatalf("load state: %v", loadErr)
+	}
+	if got.Weight != 0 {
+		t.Fatalf("expected rollback to set weight 0, got %d", got.Weight)
 	}
 }
