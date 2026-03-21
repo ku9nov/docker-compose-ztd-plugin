@@ -11,17 +11,28 @@ type HTTPConfig struct {
 }
 
 type HTTPRouter struct {
-	Rule    string `yaml:"rule,omitempty"`
-	Service string `yaml:"service,omitempty"`
+	Rule     string `yaml:"rule,omitempty"`
+	Service  string `yaml:"service,omitempty"`
+	Priority int    `yaml:"priority,omitempty"`
 }
 
 type HTTPService struct {
-	LoadBalancer HTTPLoadBalancer `yaml:"loadBalancer,omitempty"`
+	LoadBalancer *HTTPLoadBalancer  `yaml:"loadBalancer,omitempty"`
+	Weighted     *HTTPWeightedRoute `yaml:"weighted,omitempty"`
 }
 
 type HTTPLoadBalancer struct {
 	Servers     []HTTPServer  `yaml:"servers,omitempty"`
 	HealthCheck *HealthChecks `yaml:"healthCheck,omitempty"`
+}
+
+type HTTPWeightedRoute struct {
+	Services []HTTPWeightedService `yaml:"services,omitempty"`
+}
+
+type HTTPWeightedService struct {
+	Name   string `yaml:"name,omitempty"`
+	Weight int    `yaml:"weight,omitempty"`
 }
 
 type HTTPServer struct {

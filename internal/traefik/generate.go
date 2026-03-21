@@ -107,7 +107,7 @@ func (g *Generator) Generate(ctx context.Context, composeFiles []string, envFile
 		}
 
 		httpService := types.HTTPService{
-			LoadBalancer: types.HTTPLoadBalancer{
+			LoadBalancer: &types.HTTPLoadBalancer{
 				Servers: httpServers,
 			},
 		}
