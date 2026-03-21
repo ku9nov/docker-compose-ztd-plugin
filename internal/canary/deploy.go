@@ -62,8 +62,6 @@ func (d *Deployer) Run(ctx context.Context, opt Options) error {
 	switch opt.Action {
 	case "":
 		return d.deploy(ctx, opt)
-	case "promote":
-		return d.promote(ctx, opt)
 	case "rollback":
 		return d.rollback(ctx, opt)
 	case "cleanup":
@@ -246,57 +244,6 @@ func (d *Deployer) deployFromExistingState(ctx context.Context, opt Options, pro
 	}
 
 	d.log.Infof("==> Canary deploy reused existing pool without scaling. old=%d%% new=%d%%", 100-opt.Weight, opt.Weight)
-	return nil
-}
-
-func (d *Deployer) promote(ctx context.Context, opt Options) error {
-	if opt.Weight <= 0 || opt.Weight > 100 {
-		return fmt.Errorf("promote weight must be between 1 and 100")
-	}
-	if opt.AutoCleanup > 0 && opt.Weight != 100 {
-		return fmt.Errorf("--auto-cleanup for promote requires --weight=100")
-	}
-
-	project, st, err := d.findStateByService(opt.Service)
-	if err != nil {
-		return err
-	}
-	labels, err := d.labelsFromState(ctx, st)
-	if err != nil {
-		return err
-	}
-	productionRule, port := productionRuleAndPort(labels, st.Service)
-	hc := extractHealthCheck(labels, st.Service)
-
-	if err := traefik.ApplyCanaryConfig(opt.TraefikConfigFile, traefik.CanaryConfigInput{
-		Service:        st.Service,
-		ProductionRule: productionRule,
-		Port:           port,
-		OldIDs:         st.Old,
-		NewIDs:         st.New,
-		NewWeight:      opt.Weight,
-		HealthCheck:    hc,
-	}); err != nil {
-		return err
-	}
-	st = d.ensureCanaryBaseline(ctx, opt, project, st)
-	if err := d.runMetricsGateWithRollback(ctx, opt, "promote", st); err != nil {
-		return err
-	}
-
-	now := time.Now().UTC()
-	st.Weight = opt.Weight
-	st.SwitchedAt = &now
-	if opt.AutoCleanup > 0 {
-		cleanupAt := now.Add(opt.AutoCleanup)
-		st.CleanupAt = &cleanupAt
-	} else {
-		st.CleanupAt = nil
-	}
-	if err := d.store.Save(project, st); err != nil {
-		return err
-	}
-	d.log.Infof("==> Canary promote updated to new=%d%%", opt.Weight)
 	return nil
 }
 

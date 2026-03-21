@@ -159,6 +159,9 @@ func Parse(rawArgs []string) (Config, error) {
 		case token == "--analyze":
 			cfg.Analyze = true
 			args = args[1:]
+		case token == "--all":
+			cfg.RestoreAll = true
+			args = args[1:]
 		case token == "--metrics-url" || strings.HasPrefix(token, "--metrics-url="):
 			value, consumed, err := parseStringFlag(args, "--metrics-url")
 			if err != nil {
@@ -260,7 +263,7 @@ func Parse(rawArgs []string) (Config, error) {
 
 func isActionToken(token string) bool {
 	switch token {
-	case ActionSwitch, ActionCleanup, ActionPromote, ActionRollback:
+	case ActionSwitch, ActionCleanup, ActionRollback:
 		return true
 	default:
 		return false
@@ -322,6 +325,13 @@ func parseInlineValue(token string, flag string) (string, bool) {
 }
 
 func validateStrategy(cfg *Config, weightExplicitlySet bool, strategyExplicitlySet bool) error {
+	if cfg.RestoreAll {
+		if cfg.Service != "restore" || cfg.Action != "" {
+			return fmt.Errorf("--all requires command: restore")
+		}
+		return nil
+	}
+
 	switch cfg.Strategy {
 	case StrategyRolling:
 	case StrategyBlueGreen:
@@ -365,8 +375,8 @@ func validateStrategy(cfg *Config, weightExplicitlySet bool, strategyExplicitlyS
 		}
 	}
 
-	if cfg.AutoCleanup > 0 && cfg.Action != ActionSwitch && cfg.Action != ActionPromote && cfg.Action != ActionRollback {
-		return fmt.Errorf("--auto-cleanup requires action %s, %s or %s", ActionSwitch, ActionPromote, ActionRollback)
+	if cfg.AutoCleanup > 0 && cfg.Action != ActionSwitch && cfg.Action != ActionRollback {
+		return fmt.Errorf("--auto-cleanup requires action %s or %s", ActionSwitch, ActionRollback)
 	}
 
 	if cfg.Analyze && cfg.Strategy != StrategyBlueGreen && cfg.Strategy != StrategyCanary {
@@ -398,7 +408,7 @@ func requiredStrategyForAction(action string) (string, bool) {
 	switch action {
 	case ActionSwitch:
 		return StrategyBlueGreen, true
-	case ActionPromote, ActionRollback:
+	case ActionRollback:
 		return StrategyCanary, true
 	case ActionCleanup:
 		return "", true
@@ -409,7 +419,7 @@ func requiredStrategyForAction(action string) (string, bool) {
 
 func defaultStrategyForAction(action string) string {
 	switch action {
-	case ActionPromote, ActionRollback:
+	case ActionRollback:
 		return StrategyCanary
 	case ActionSwitch, ActionCleanup:
 		return StrategyBlueGreen

@@ -266,7 +266,7 @@ func TestDeployFailsSafeOnStateDrift(t *testing.T) {
 	}
 }
 
-func TestPromoteAnalyzeFailureTriggersRollback(t *testing.T) {
+func TestDeployFromExistingStateAnalyzeFailureTriggersRollback(t *testing.T) {
 	t.Parallel()
 
 	store := state.NewStore(t.TempDir())
@@ -292,13 +292,18 @@ func TestPromoteAnalyzeFailureTriggersRollback(t *testing.T) {
 	}))
 	defer server.Close()
 
-	deployer := NewDeployer(logrus.New(), nil, &dockerMock{
+	compose := &composeMock{
+		idsByService: map[string][]string{
+			"api": {"old-id", "new-id"},
+		},
+	}
+	deployer := NewDeployer(logrus.New(), compose, &dockerMock{
 		labels: map[string]string{
 			"traefik.http.routers.api.rule":                      "Host(`example.com`)",
 			"traefik.http.services.api.loadbalancer.server.port": "8080",
 		},
 	}, store)
-	err := deployer.promote(context.Background(), Options{
+	err := deployer.deploy(context.Background(), Options{
 		Service:           "api",
 		Weight:            70,
 		TraefikConfigFile: t.TempDir() + "/dynamic.yml",
@@ -314,7 +319,7 @@ func TestPromoteAnalyzeFailureTriggersRollback(t *testing.T) {
 		},
 	})
 	if err == nil {
-		t.Fatal("expected promote to fail when metrics gate fails")
+		t.Fatal("expected deploy to fail when metrics gate fails")
 	}
 
 	got, loadErr := store.Load("project")

@@ -29,7 +29,6 @@ const (
 	ActionDeploy   = ""
 	ActionSwitch   = "switch"
 	ActionCleanup  = "cleanup"
-	ActionPromote  = "promote"
 	ActionRollback = "rollback"
 )
 
@@ -62,4 +61,6 @@ type Config struct {
 	AnalyzeMax5xxRatio   float64
 	AnalyzeMax4xxRatio   float64
 	AnalyzeMaxLatencyMS  float64
+	RestoreAll           bool
+	SkipAutoRegister     bool
 }

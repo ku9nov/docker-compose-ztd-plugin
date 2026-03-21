@@ -188,26 +188,6 @@ func TestParse_ToRequiresSwitch(t *testing.T) {
 	}
 }
 
-func TestParse_CanaryPromoteDefaultsStrategyToCanary(t *testing.T) {
-	cfg, err := Parse([]string{
-		"--weight=70",
-		"api",
-		"promote",
-	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if cfg.Strategy != StrategyCanary {
-		t.Fatalf("expected strategy %s, got %s", StrategyCanary, cfg.Strategy)
-	}
-	if cfg.Action != ActionPromote {
-		t.Fatalf("expected action promote, got %s", cfg.Action)
-	}
-	if cfg.Weight != 70 {
-		t.Fatalf("expected weight 70, got %d", cfg.Weight)
-	}
-}
-
 func TestParse_CanaryRollbackDefaultsStrategyToCanary(t *testing.T) {
 	cfg, err := Parse([]string{
 		"api",
@@ -224,10 +204,8 @@ func TestParse_CanaryRollbackDefaultsStrategyToCanary(t *testing.T) {
 	}
 }
 
-func TestParse_PromoteRequiresCanaryStrategy(t *testing.T) {
+func TestParse_PromoteActionIsNotSupported(t *testing.T) {
 	_, err := Parse([]string{
-		"--strategy=blue-green",
-		"--weight=50",
 		"api",
 		"promote",
 	})
@@ -287,6 +265,32 @@ func TestParse_AnalyzeRequiresBlueGreenOrCanary(t *testing.T) {
 	_, err := Parse([]string{
 		"--strategy=rolling",
 		"--analyze",
+		"api",
+	})
+	if err == nil {
+		t.Fatal("expected parse error")
+	}
+}
+
+func TestParse_RestoreAllCommand(t *testing.T) {
+	cfg, err := Parse([]string{
+		"restore",
+		"--all",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Service != "restore" {
+		t.Fatalf("expected restore service command, got %s", cfg.Service)
+	}
+	if !cfg.RestoreAll {
+		t.Fatal("expected restore all to be enabled")
+	}
+}
+
+func TestParse_AllRequiresRestoreCommand(t *testing.T) {
+	_, err := Parse([]string{
+		"--all",
 		"api",
 	})
 	if err == nil {

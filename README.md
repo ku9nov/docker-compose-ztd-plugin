@@ -73,7 +73,7 @@ docker ztd --strategy=blue-green api switch
 docker ztd --strategy=blue-green --auto-cleanup=10m api switch
 docker ztd --strategy=blue-green api cleanup
 docker ztd --strategy=canary --weight=10 api
-docker ztd --strategy=canary --weight=70 api promote
+docker ztd --strategy=canary --weight=70 api
 docker ztd --strategy=canary api rollback
 docker ztd --strategy=canary --auto-cleanup=10m api rollback
 docker ztd --strategy=canary api cleanup
@@ -96,12 +96,11 @@ Options:
 - `--ip-mode VALUE` (blue-green only)
 - `--weight N` (canary only, default: `10`)
 - `--to COLOR` (blue-green `switch` action only, `blue|green`)
-- `--auto-cleanup DURATION` (`switch`/`promote`/`rollback` actions only, e.g. `10m`)
+- `--auto-cleanup DURATION` (`switch`/`rollback` actions only, e.g. `10m`)
 
 Actions:
 
 - `switch` (blue-green only): flips active production traffic between blue and green
-- `promote` (canary only): updates canary traffic to `--weight`
 - `rollback` (canary only): sets canary traffic to `0` (old receives `100%`)
 - `cleanup` (blue-green/canary): removes inactive containers and clears state file
 
