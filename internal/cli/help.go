@@ -40,10 +40,10 @@ Options:
         --traefik-conf FILE     Specify Traefik configuration file (default: %s)
 
   Blue-green:
-        --host-mode VALUE       Route by host (example: green.example.com)
-        --headers-mode VALUE    Route by header (example: X-Env=green)
-        --cookies-mode VALUE    Route by cookie (example: env=green)
-        --ip-mode VALUE         Route by client IP CIDR (example: 10.0.0.0/24)
+        --host-mode VALUE       Route by host (HTTP Host / TCP HostSNI, example: green.example.com)
+        --headers-mode VALUE    Route by header (HTTP only, example: X-Env=green)
+        --cookies-mode VALUE    Route by cookie (HTTP only, example: env=green)
+        --ip-mode VALUE         Route by client IP CIDR (HTTP/TCP, example: 10.0.0.0/24)
         --to COLOR              switch action target color (blue|green)
 
   Canary:

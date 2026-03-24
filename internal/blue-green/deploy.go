@@ -171,6 +171,13 @@ func (d *Deployer) deploy(ctx context.Context, opt Options) (err error) {
 		return err
 	}
 	productionRule, port := productionRuleAndPort(labels, opt.Service)
+	tcpRoutes := traefik.ExtractTCPRoutes(labels)
+	d.warnTCPIncompatibleQAModes(tcpRoutes, &state.QAModes{
+		Host:    opt.HostMode,
+		Headers: opt.HeadersMode,
+		Cookies: opt.CookiesMode,
+		IP:      opt.IPMode,
+	})
 	hc := extractHealthCheck(labels, opt.Service)
 
 	currentState := state.DeploymentState{
@@ -198,6 +205,7 @@ func (d *Deployer) deploy(ctx context.Context, opt Options) (err error) {
 		Port:           port,
 		BlueIDs:        oldIDs,
 		GreenIDs:       newIDs,
+		TCPRouters:     tcpRoutes,
 		QA:             currentState.QA,
 		HealthCheck:    hc,
 	}); err != nil {
@@ -446,4 +454,14 @@ func formatBlueGreenResultReport(result metricsgate.Result, decision string) str
 		result.MeanLatencyMS,
 		decision,
 	)
+}
+
+func (d *Deployer) warnTCPIncompatibleQAModes(tcpRoutes []traefik.TCPRouteInput, qa *state.QAModes) {
+	if len(tcpRoutes) == 0 || qa == nil {
+		return
+	}
+	if strings.TrimSpace(qa.Headers) == "" && strings.TrimSpace(qa.Cookies) == "" {
+		return
+	}
+	d.log.Warn("==> TCP routers detected: --headers-mode and --cookies-mode are HTTP-only and will be ignored for TCP routing")
 }

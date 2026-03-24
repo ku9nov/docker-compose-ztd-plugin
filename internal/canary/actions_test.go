@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -328,5 +330,53 @@ func TestDeployFromExistingStateAnalyzeFailureTriggersRollback(t *testing.T) {
 	}
 	if got.Weight != 0 {
 		t.Fatalf("expected rollback to set weight 0, got %d", got.Weight)
+	}
+}
+
+func TestRollbackWritesTCPWeightedDynamicConfig(t *testing.T) {
+	t.Parallel()
+
+	store := state.NewStore(t.TempDir())
+	st := state.DeploymentState{
+		Service:   "api",
+		Strategy:  state.StrategyCanary,
+		Old:       []string{"old-id"},
+		New:       []string{"new-id"},
+		Weight:    70,
+		CreatedAt: time.Now().UTC(),
+	}
+	if err := store.Save("project", st); err != nil {
+		t.Fatalf("save state: %v", err)
+	}
+
+	dynamicPath := t.TempDir() + "/dynamic.yml"
+	deployer := NewDeployer(logrus.New(), nil, &dockerMock{
+		labels: map[string]string{
+			"traefik.http.routers.api.rule":                          "Host(`example.com`)",
+			"traefik.http.services.api.loadbalancer.server.port":     "8080",
+			"traefik.tcp.routers.api-xmpp.rule":                      "HostSNI(`*`)",
+			"traefik.tcp.routers.api-xmpp.entrypoints":               "xmpp",
+			"traefik.tcp.routers.api-xmpp.service":                   "api-xmpp",
+			"traefik.tcp.services.api-xmpp.loadbalancer.server.port": "5222",
+		},
+	}, store)
+
+	if err := deployer.rollback(context.Background(), Options{
+		Service:           "api",
+		TraefikConfigFile: dynamicPath,
+	}); err != nil {
+		t.Fatalf("rollback failed: %v", err)
+	}
+
+	data, err := os.ReadFile(dynamicPath)
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	content := string(data)
+	if !strings.Contains(content, "\ntcp:") && !strings.HasPrefix(content, "tcp:") {
+		t.Fatalf("expected tcp section in config, got:\n%s", content)
+	}
+	if !strings.Contains(content, "api-xmpp_old") || !strings.Contains(content, "weight: 100") {
+		t.Fatalf("expected weighted old tcp service in config, got:\n%s", content)
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -361,5 +362,62 @@ func TestSwitchTrafficAnalyzeFailureIsWarningOnly(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("expected warning-only analyze behavior, got error: %v", err)
+	}
+}
+
+func TestSwitchTrafficWritesTCPDynamicConfig(t *testing.T) {
+	t.Parallel()
+
+	store := state.NewStore(t.TempDir())
+	st := state.DeploymentState{
+		Service:   "api",
+		Strategy:  state.StrategyBlueGreen,
+		Blue:      []string{"blue-id"},
+		Green:     []string{"green-id"},
+		Active:    state.ColorBlue,
+		CreatedAt: time.Now().UTC(),
+		QA: &state.QAModes{
+			Host: "green.example.com",
+			IP:   "10.0.0.0/24",
+		},
+	}
+	if err := store.Save("project", st); err != nil {
+		t.Fatalf("save state: %v", err)
+	}
+
+	dynamicPath := t.TempDir() + "/dynamic.yml"
+	deployer := NewDeployer(logrus.New(), nil, &dockerMock{
+		labels: map[string]string{
+			"traefik.http.routers.api.rule":                           "Host(`example.com`)",
+			"traefik.http.services.api.loadbalancer.server.port":      "8080",
+			"traefik.tcp.routers.api-xmpp.rule":                       "HostSNI(`*`)",
+			"traefik.tcp.routers.api-xmpp.entrypoints":                "xmpp",
+			"traefik.tcp.services.api-xmpp.loadbalancer.server.port":  "5222",
+			"traefik.tcp.routers.api-xmpp.service":                    "api-xmpp",
+			"traefik.http.services.api.loadbalancer.healthCheck.path": "/health",
+		},
+	}, store)
+
+	if err := deployer.switchTraffic(context.Background(), Options{
+		Service:           "api",
+		SwitchTo:          state.ColorGreen,
+		TraefikConfigFile: dynamicPath,
+	}); err != nil {
+		t.Fatalf("switch traffic failed: %v", err)
+	}
+
+	data, err := os.ReadFile(dynamicPath)
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	content := string(data)
+	if !strings.Contains(content, "\ntcp:") && !strings.HasPrefix(content, "tcp:") {
+		t.Fatalf("expected tcp section in config, got:\n%s", content)
+	}
+	if !strings.Contains(content, "api-xmpp-blue") || !strings.Contains(content, "api-xmpp-green") {
+		t.Fatalf("expected blue/green tcp services in config, got:\n%s", content)
+	}
+	if !strings.Contains(content, "api-qa-api-xmpp-tcp-host") || !strings.Contains(content, "api-qa-api-xmpp-tcp-ip") {
+		t.Fatalf("expected tcp QA routers in config, got:\n%s", content)
 	}
 }

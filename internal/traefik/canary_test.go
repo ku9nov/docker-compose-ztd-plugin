@@ -20,6 +20,16 @@ func TestApplyCanaryConfig(t *testing.T) {
 		OldIDs:         []string{"aaaaaaaaaaaa111111111111"},
 		NewIDs:         []string{"bbbbbbbbbbbb222222222222"},
 		NewWeight:      10,
+		TCPRouters: []TCPRouteInput{
+			{
+				RouterName:      "api-xmpp",
+				Rule:            "HostSNI(`*`)",
+				RouterService:   "api-xmpp",
+				BackendPort:     "5222",
+				BackendBaseName: "api-xmpp",
+				EntryPoints:     []string{"xmpp"},
+			},
+		},
 		HealthCheck: &types.HealthChecks{
 			Path: "/healthz",
 		},
@@ -41,6 +51,13 @@ func TestApplyCanaryConfig(t *testing.T) {
 	assertContains(t, content, "name: api_new")
 	assertContains(t, content, "weight: 10")
 	assertContains(t, content, "path: /healthz")
+	assertContains(t, content, "tcp:")
+	assertContains(t, content, "api-xmpp_old:")
+	assertContains(t, content, "api-xmpp_new:")
+	assertContains(t, content, "name: api-xmpp_old")
+	assertContains(t, content, "name: api-xmpp_new")
+	assertContains(t, content, "address: aaaaaaaaaaaa:5222")
+	assertContains(t, content, "service: api-xmpp")
 }
 
 func TestApplyCanaryConfigTerminalWeightAllowsSingleSide(t *testing.T) {

@@ -41,6 +41,8 @@ func (d *Deployer) switchTraffic(ctx context.Context, opt Options) error {
 		return err
 	}
 	productionRule, port := productionRuleAndPort(labels, currentState.Service)
+	tcpRoutes := traefik.ExtractTCPRoutes(labels)
+	d.warnTCPIncompatibleQAModes(tcpRoutes, currentState.QA)
 	hc := extractHealthCheck(labels, currentState.Service)
 
 	if err := traefik.ApplyBlueGreenConfig(opt.TraefikConfigFile, traefik.BlueGreenConfigInput{
@@ -50,6 +52,7 @@ func (d *Deployer) switchTraffic(ctx context.Context, opt Options) error {
 		Port:           port,
 		BlueIDs:        currentState.Blue,
 		GreenIDs:       currentState.Green,
+		TCPRouters:     tcpRoutes,
 		QA:             currentState.QA,
 		HealthCheck:    hc,
 	}); err != nil {

@@ -21,6 +21,16 @@ func TestApplyBlueGreenConfig(t *testing.T) {
 		Port:           "8080",
 		BlueIDs:        []string{"aaaaaaaaaaaa111111111111"},
 		GreenIDs:       []string{"bbbbbbbbbbbb222222222222"},
+		TCPRouters: []TCPRouteInput{
+			{
+				RouterName:      "api-xmpp",
+				Rule:            "HostSNI(`*`)",
+				RouterService:   "api-xmpp",
+				BackendPort:     "5222",
+				BackendBaseName: "api-xmpp",
+				EntryPoints:     []string{"xmpp"},
+			},
+		},
 		QA: &state.QAModes{
 			Host:    "green.example.com",
 			Headers: "X-Env=green",
@@ -52,6 +62,63 @@ func TestApplyBlueGreenConfig(t *testing.T) {
 	assertContains(t, content, "api-blue:")
 	assertContains(t, content, "api-green:")
 	assertNotContains(t, content, "api:\n            loadBalancer")
+	assertContains(t, content, "tcp:")
+	assertContains(t, content, "api-xmpp:")
+	assertContains(t, content, "service: api-xmpp-blue")
+	assertContains(t, content, "api-xmpp-blue:")
+	assertContains(t, content, "api-xmpp-green:")
+	assertContains(t, content, "address: aaaaaaaaaaaa:5222")
+	assertContains(t, content, "api-qa-api-xmpp-tcp-host:")
+	assertContains(t, content, "HostSNI(`green.example.com`)")
+	assertContains(t, content, "api-qa-api-xmpp-tcp-ip:")
+	assertContains(t, content, "ClientIP(`10.0.0.0/24`)")
+}
+
+func TestApplyBlueGreenConfig_TCPQARoutersPerTCPRouter(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "dynamic_conf.yml")
+	err := ApplyBlueGreenConfig(path, BlueGreenConfigInput{
+		Service:        "api",
+		Active:         state.ColorBlue,
+		ProductionRule: "Host(`example.com`)",
+		Port:           "8080",
+		BlueIDs:        []string{"aaaaaaaaaaaa111111111111"},
+		GreenIDs:       []string{"bbbbbbbbbbbb222222222222"},
+		TCPRouters: []TCPRouteInput{
+			{
+				RouterName:      "api-xmpp",
+				Rule:            "HostSNI(`*`)",
+				RouterService:   "api-xmpp",
+				BackendPort:     "5222",
+				BackendBaseName: "api-xmpp",
+				EntryPoints:     []string{"xmpp"},
+			},
+			{
+				RouterName:      "api-xmpp-secure",
+				Rule:            "HostSNI(`*`)",
+				RouterService:   "api-xmpp-secure",
+				BackendPort:     "5223",
+				BackendBaseName: "api-xmpp-secure",
+				EntryPoints:     []string{"xmpp-secure"},
+			},
+		},
+		QA: &state.QAModes{
+			IP: "10.0.0.0/24",
+		},
+	})
+	if err != nil {
+		t.Fatalf("apply config: %v", err)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	content := string(data)
+	assertContains(t, content, "api-qa-api-xmpp-tcp-ip:")
+	assertContains(t, content, "api-qa-api-xmpp-secure-tcp-ip:")
+	assertNotContains(t, content, "api-qa-tcp-ip:")
 }
 
 func assertContains(t *testing.T, content string, expected string) {

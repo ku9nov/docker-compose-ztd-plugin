@@ -45,6 +45,7 @@ func (d *Deployer) CleanupProjectState(ctx context.Context, project string, st s
 		return err
 	}
 	productionRule, port := productionRuleAndPort(labels, st.Service)
+	tcpRoutes := traefik.ExtractTCPRoutes(labels)
 	hc := extractHealthCheck(labels, st.Service)
 
 	activeBlue := st.Blue
@@ -62,6 +63,7 @@ func (d *Deployer) CleanupProjectState(ctx context.Context, project string, st s
 		Port:           port,
 		BlueIDs:        activeBlue,
 		GreenIDs:       activeGreen,
+		TCPRouters:     tcpRoutes,
 		QA:             nil,
 		HealthCheck:    hc,
 	}); err != nil {

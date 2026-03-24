@@ -21,6 +21,7 @@ type BlueGreenConfigInput struct {
 	Port           string
 	BlueIDs        []string
 	GreenIDs       []string
+	TCPRouters     []TCPRouteInput
 	QA             *state.QAModes
 	HealthCheck    *types.HealthChecks
 }
@@ -44,6 +45,7 @@ func ApplyBlueGreenConfig(path string, input BlueGreenConfigInput) error {
 		return err
 	}
 	ensureHTTPConfig(&cfg)
+	ensureTCPConfig(&cfg)
 
 	blueService := serviceColorName(input.Service, state.ColorBlue)
 	greenService := serviceColorName(input.Service, state.ColorGreen)
@@ -66,6 +68,47 @@ func ApplyBlueGreenConfig(path string, input BlueGreenConfigInput) error {
 	setOrDeleteQARouter(cfg.HTTP.Routers, qaRouterName(input.Service, "headers"), appendRule(greenRuleSource, headerModeExpr(input.QA)), greenService)
 	setOrDeleteQARouter(cfg.HTTP.Routers, qaRouterName(input.Service, "cookies"), appendRule(greenRuleSource, cookieModeExpr(input.QA)), greenService)
 	setOrDeleteQARouter(cfg.HTTP.Routers, qaRouterName(input.Service, "ip"), appendRule(greenRuleSource, ipModeExpr(input.QA)), greenService)
+
+	for _, tcp := range input.TCPRouters {
+		baseName := strings.TrimSpace(tcp.BackendBaseName)
+		if baseName == "" {
+			baseName = tcp.RouterService
+		}
+		blueTCPService := serviceColorName(baseName, state.ColorBlue)
+		greenTCPService := serviceColorName(baseName, state.ColorGreen)
+		setOrDeleteTCPService(cfg.TCP.Services, blueTCPService, input.BlueIDs, tcp.BackendPort)
+		setOrDeleteTCPService(cfg.TCP.Services, greenTCPService, input.GreenIDs, tcp.BackendPort)
+		delete(cfg.TCP.Services, tcp.RouterService)
+
+		activeTCPService := blueTCPService
+		if input.Active == state.ColorGreen {
+			activeTCPService = greenTCPService
+		}
+		cfg.TCP.Routers[tcp.RouterName] = types.TCPRouter{
+			Rule:        tcp.Rule,
+			Service:     activeTCPService,
+			EntryPoints: append([]string{}, tcp.EntryPoints...),
+		}
+
+		setOrDeleteTCPQARouter(
+			cfg.TCP.Routers,
+			tcpQARouterName(input.Service, tcp.RouterName, "host"),
+			tcpHostModeRule(input.QA),
+			greenTCPService,
+			tcp.EntryPoints,
+		)
+		setOrDeleteTCPQARouter(
+			cfg.TCP.Routers,
+			tcpQARouterName(input.Service, tcp.RouterName, "ip"),
+			appendRule(tcp.Rule, tcpIPModeExpr(input.QA)),
+			greenTCPService,
+			tcp.EntryPoints,
+		)
+	}
+
+	// Remove legacy single TCP QA routers from older versions.
+	delete(cfg.TCP.Routers, qaRouterName(input.Service, "tcp-host"))
+	delete(cfg.TCP.Routers, qaRouterName(input.Service, "tcp-ip"))
 
 	data, err := configio.MarshalYAML(cfg)
 	if err != nil {
@@ -107,6 +150,18 @@ func ensureHTTPConfig(cfg *types.DynamicConfig) {
 	}
 }
 
+func ensureTCPConfig(cfg *types.DynamicConfig) {
+	if cfg.TCP == nil {
+		cfg.TCP = &types.TCPConfig{}
+	}
+	if cfg.TCP.Routers == nil {
+		cfg.TCP.Routers = map[string]types.TCPRouter{}
+	}
+	if cfg.TCP.Services == nil {
+		cfg.TCP.Services = map[string]types.TCPService{}
+	}
+}
+
 func setOrDeleteHTTPService(services map[string]types.HTTPService, name string, ids []string, port string, hc *types.HealthChecks) {
 	if len(ids) == 0 {
 		delete(services, name)
@@ -141,6 +196,36 @@ func setOrDeleteWeightedHTTPService(services map[string]types.HTTPService, name 
 	}
 }
 
+func setOrDeleteTCPService(services map[string]types.TCPService, name string, ids []string, port string) {
+	if len(ids) == 0 {
+		delete(services, name)
+		return
+	}
+	servers := make([]types.TCPServer, 0, len(ids))
+	for _, id := range ids {
+		servers = append(servers, types.TCPServer{
+			Address: shortID(id) + ":" + port,
+		})
+	}
+	services[name] = types.TCPService{
+		LoadBalancer: &types.TCPLoadBalancer{
+			Servers: servers,
+		},
+	}
+}
+
+func setOrDeleteWeightedTCPService(services map[string]types.TCPService, name string, weighted []types.TCPWeightedService) {
+	if len(weighted) == 0 {
+		delete(services, name)
+		return
+	}
+	services[name] = types.TCPService{
+		Weighted: &types.TCPWeightedRoute{
+			Services: weighted,
+		},
+	}
+}
+
 func setOrDeleteQARouter(routers map[string]types.HTTPRouter, name string, rule string, service string) {
 	if strings.TrimSpace(rule) == "" {
 		delete(routers, name)
@@ -153,12 +238,28 @@ func setOrDeleteQARouter(routers map[string]types.HTTPRouter, name string, rule 
 	}
 }
 
+func setOrDeleteTCPQARouter(routers map[string]types.TCPRouter, name string, rule string, service string, entryPoints []string) {
+	if strings.TrimSpace(rule) == "" {
+		delete(routers, name)
+		return
+	}
+	routers[name] = types.TCPRouter{
+		Rule:        rule,
+		Service:     service,
+		EntryPoints: append([]string{}, entryPoints...),
+	}
+}
+
 func serviceColorName(service string, color string) string {
 	return service + "-" + color
 }
 
 func qaRouterName(service string, mode string) string {
 	return service + "-qa-" + mode
+}
+
+func tcpQARouterName(service string, tcpRouter string, mode string) string {
+	return service + "-qa-" + tcpRouter + "-tcp-" + mode
 }
 
 func hostModeRule(qa *state.QAModes) string {
@@ -170,6 +271,20 @@ func hostModeRule(qa *state.QAModes) string {
 		return value
 	}
 	return fmt.Sprintf("Host(`%s`)", value)
+}
+
+func tcpHostModeRule(qa *state.QAModes) string {
+	if qa == nil || strings.TrimSpace(qa.Host) == "" {
+		return ""
+	}
+	value := strings.TrimSpace(qa.Host)
+	if strings.Contains(value, "HostSNI(") {
+		return value
+	}
+	if strings.Contains(value, "Host(") {
+		return strings.Replace(value, "Host(", "HostSNI(", 1)
+	}
+	return fmt.Sprintf("HostSNI(`%s`)", value)
 }
 
 func headerModeExpr(qa *state.QAModes) string {
@@ -206,6 +321,17 @@ func cookieModeExpr(qa *state.QAModes) string {
 }
 
 func ipModeExpr(qa *state.QAModes) string {
+	if qa == nil || strings.TrimSpace(qa.IP) == "" {
+		return ""
+	}
+	value := strings.TrimSpace(qa.IP)
+	if strings.Contains(value, "ClientIP(") {
+		return value
+	}
+	return fmt.Sprintf("ClientIP(`%s`)", value)
+}
+
+func tcpIPModeExpr(qa *state.QAModes) string {
 	if qa == nil || strings.TrimSpace(qa.IP) == "" {
 		return ""
 	}

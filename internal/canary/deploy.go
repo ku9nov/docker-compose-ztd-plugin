@@ -157,6 +157,7 @@ func (d *Deployer) deploy(ctx context.Context, opt Options) (err error) {
 		return err
 	}
 	productionRule, port := productionRuleAndPort(labels, opt.Service)
+	tcpRoutes := traefik.ExtractTCPRoutes(labels)
 	hc := extractHealthCheck(labels, opt.Service)
 
 	currentState := state.DeploymentState{
@@ -177,6 +178,7 @@ func (d *Deployer) deploy(ctx context.Context, opt Options) (err error) {
 		OldIDs:         oldIDs,
 		NewIDs:         newIDs,
 		NewWeight:      opt.Weight,
+		TCPRouters:     tcpRoutes,
 		HealthCheck:    hc,
 	}); err != nil {
 		return err
@@ -217,6 +219,7 @@ func (d *Deployer) deployFromExistingState(ctx context.Context, opt Options, pro
 		return err
 	}
 	productionRule, port := productionRuleAndPort(labels, st.Service)
+	tcpRoutes := traefik.ExtractTCPRoutes(labels)
 	hc := extractHealthCheck(labels, st.Service)
 
 	if err := traefik.ApplyCanaryConfig(opt.TraefikConfigFile, traefik.CanaryConfigInput{
@@ -226,6 +229,7 @@ func (d *Deployer) deployFromExistingState(ctx context.Context, opt Options, pro
 		OldIDs:         st.Old,
 		NewIDs:         st.New,
 		NewWeight:      opt.Weight,
+		TCPRouters:     tcpRoutes,
 		HealthCheck:    hc,
 	}); err != nil {
 		return err
@@ -257,6 +261,7 @@ func (d *Deployer) rollback(ctx context.Context, opt Options) error {
 		return err
 	}
 	productionRule, port := productionRuleAndPort(labels, st.Service)
+	tcpRoutes := traefik.ExtractTCPRoutes(labels)
 	hc := extractHealthCheck(labels, st.Service)
 
 	if err := traefik.ApplyCanaryConfig(opt.TraefikConfigFile, traefik.CanaryConfigInput{
@@ -266,6 +271,7 @@ func (d *Deployer) rollback(ctx context.Context, opt Options) error {
 		OldIDs:         st.Old,
 		NewIDs:         st.New,
 		NewWeight:      0,
+		TCPRouters:     tcpRoutes,
 		HealthCheck:    hc,
 	}); err != nil {
 		return err
@@ -332,6 +338,7 @@ func (d *Deployer) CleanupProjectState(ctx context.Context, project string, st s
 		return err
 	}
 	productionRule, port := productionRuleAndPort(labels, st.Service)
+	tcpRoutes := traefik.ExtractTCPRoutes(labels)
 	hc := extractHealthCheck(labels, st.Service)
 
 	var oldIDs []string
@@ -349,6 +356,7 @@ func (d *Deployer) CleanupProjectState(ctx context.Context, project string, st s
 		OldIDs:         oldIDs,
 		NewIDs:         newIDs,
 		NewWeight:      weight,
+		TCPRouters:     tcpRoutes,
 		HealthCheck:    hc,
 	}); err != nil {
 		return fmt.Errorf("failed to update traefik config after cleanup: %w", err)

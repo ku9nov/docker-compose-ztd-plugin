@@ -17,6 +17,7 @@ type CanaryConfigInput struct {
 	OldIDs         []string
 	NewIDs         []string
 	NewWeight      int
+	TCPRouters     []TCPRouteInput
 	HealthCheck    *types.HealthChecks
 }
 
@@ -47,6 +48,7 @@ func ApplyCanaryConfig(path string, input CanaryConfigInput) error {
 		return err
 	}
 	ensureHTTPConfig(&cfg)
+	ensureTCPConfig(&cfg)
 
 	oldService := canaryServiceName(input.Service, "old")
 	newService := canaryServiceName(input.Service, "new")
@@ -75,6 +77,38 @@ func ApplyCanaryConfig(path string, input CanaryConfigInput) error {
 	cfg.HTTP.Routers[input.Service] = types.HTTPRouter{
 		Rule:    input.ProductionRule,
 		Service: input.Service,
+	}
+
+	for _, tcp := range input.TCPRouters {
+		baseName := strings.TrimSpace(tcp.BackendBaseName)
+		if baseName == "" {
+			baseName = tcp.RouterService
+		}
+
+		oldTCPService := canaryServiceName(baseName, "old")
+		newTCPService := canaryServiceName(baseName, "new")
+		setOrDeleteTCPService(cfg.TCP.Services, oldTCPService, input.OldIDs, tcp.BackendPort)
+		setOrDeleteTCPService(cfg.TCP.Services, newTCPService, input.NewIDs, tcp.BackendPort)
+
+		tcpWeighted := make([]types.TCPWeightedService, 0, 2)
+		if oldWeight > 0 {
+			tcpWeighted = append(tcpWeighted, types.TCPWeightedService{
+				Name:   oldTCPService,
+				Weight: oldWeight,
+			})
+		}
+		if input.NewWeight > 0 {
+			tcpWeighted = append(tcpWeighted, types.TCPWeightedService{
+				Name:   newTCPService,
+				Weight: input.NewWeight,
+			})
+		}
+		setOrDeleteWeightedTCPService(cfg.TCP.Services, tcp.RouterService, tcpWeighted)
+		cfg.TCP.Routers[tcp.RouterName] = types.TCPRouter{
+			Rule:        tcp.Rule,
+			Service:     tcp.RouterService,
+			EntryPoints: append([]string{}, tcp.EntryPoints...),
+		}
 	}
 
 	data, err := configio.MarshalYAML(cfg)

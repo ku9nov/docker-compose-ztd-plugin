@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 
 	"github.com/ku9nov/docker-compose-ztd-plugin/internal/compose"
@@ -117,34 +116,24 @@ func (g *Generator) Generate(ctx context.Context, composeFiles []string, envFile
 		}
 		cfg.HTTP.Services[serviceName] = httpService
 
-		for _, tcpName := range tcpRouterNames(labels) {
-			tcpRule := labels["traefik.tcp.routers."+tcpName+".rule"]
-			tcpServiceName := labels["traefik.tcp.routers."+tcpName+".service"]
-			if tcpServiceName == "" {
-				tcpServiceName = tcpName
-			}
-			tcpPort := labels["traefik.tcp.services."+tcpServiceName+".loadbalancer.server.port"]
-			if tcpRule == "" || tcpPort == "" {
-				continue
-			}
-
+		for _, tcp := range collectTCPRouterMeta(labels) {
 			router := types.TCPRouter{
-				Rule:    tcpRule,
-				Service: tcpServiceName,
+				Rule:    tcp.Rule,
+				Service: tcp.RouterService,
 			}
-			if eps := splitEntryPoints(labels["traefik.tcp.routers."+tcpName+".entrypoints"]); len(eps) > 0 {
-				router.EntryPoints = eps
+			if len(tcp.EntryPoints) > 0 {
+				router.EntryPoints = tcp.EntryPoints
 			}
-			cfg.TCP.Routers[tcpName] = router
+			cfg.TCP.Routers[tcp.RouterName] = router
 
 			tcpServers := make([]types.TCPServer, 0, len(endpoints))
 			for _, endpoint := range endpoints {
 				tcpServers = append(tcpServers, types.TCPServer{
-					Address: endpoint + ":" + tcpPort,
+					Address: endpoint + ":" + tcp.BackendPort,
 				})
 			}
-			cfg.TCP.Services[tcpServiceName] = types.TCPService{
-				LoadBalancer: types.TCPLoadBalancer{
+			cfg.TCP.Services[tcp.RouterService] = types.TCPService{
+				LoadBalancer: &types.TCPLoadBalancer{
 					Servers: tcpServers,
 				},
 			}
@@ -203,36 +192,3 @@ func extractHealthCheck(labels map[string]string, serviceName string) *types.Hea
 	return hc
 }
 
-func tcpRouterNames(labels map[string]string) []string {
-	set := map[string]struct{}{}
-	for key := range labels {
-		if strings.HasPrefix(key, "traefik.tcp.routers.") {
-			parts := strings.Split(key, ".")
-			if len(parts) >= 4 {
-				set[parts[3]] = struct{}{}
-			}
-		}
-	}
-
-	names := make([]string, 0, len(set))
-	for n := range set {
-		names = append(names, n)
-	}
-	sort.Strings(names)
-	return names
-}
-
-func splitEntryPoints(raw string) []string {
-	if strings.TrimSpace(raw) == "" {
-		return nil
-	}
-	parts := strings.Split(raw, ",")
-	out := make([]string, 0, len(parts))
-	for _, p := range parts {
-		p = strings.TrimSpace(p)
-		if p != "" {
-			out = append(out, p)
-		}
-	}
-	return out
-}

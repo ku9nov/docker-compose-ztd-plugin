@@ -65,11 +65,21 @@ type TCPRouter struct {
 }
 
 type TCPService struct {
-	LoadBalancer TCPLoadBalancer `yaml:"loadBalancer,omitempty"`
+	LoadBalancer *TCPLoadBalancer  `yaml:"loadBalancer,omitempty"`
+	Weighted     *TCPWeightedRoute `yaml:"weighted,omitempty"`
 }
 
 type TCPLoadBalancer struct {
 	Servers []TCPServer `yaml:"servers,omitempty"`
+}
+
+type TCPWeightedRoute struct {
+	Services []TCPWeightedService `yaml:"services,omitempty"`
+}
+
+type TCPWeightedService struct {
+	Name   string `yaml:"name,omitempty"`
+	Weight int    `yaml:"weight,omitempty"`
 }
 
 type TCPServer struct {
