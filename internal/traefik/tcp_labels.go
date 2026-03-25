@@ -64,10 +64,6 @@ func ExtractTCPRoutes(labels map[string]string) []TCPRouteInput {
 	return routes
 }
 
-func hasTCPRouters(labels map[string]string) bool {
-	return len(collectTCPRouterMeta(labels)) > 0
-}
-
 func normalizeTCPServiceBaseName(name string) string {
 	name = strings.TrimSpace(name)
 	name = strings.TrimSuffix(name, "-blue")
