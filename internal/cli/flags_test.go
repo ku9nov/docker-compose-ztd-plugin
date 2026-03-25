@@ -272,23 +272,7 @@ func TestParse_AnalyzeRequiresBlueGreenOrCanary(t *testing.T) {
 	}
 }
 
-func TestParse_RestoreAllCommand(t *testing.T) {
-	cfg, err := Parse([]string{
-		"restore",
-		"--all",
-	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if cfg.Service != "restore" {
-		t.Fatalf("expected restore service command, got %s", cfg.Service)
-	}
-	if !cfg.RestoreAll {
-		t.Fatal("expected restore all to be enabled")
-	}
-}
-
-func TestParse_AllRequiresRestoreCommand(t *testing.T) {
+func TestParse_AllFlagIsUnknown(t *testing.T) {
 	_, err := Parse([]string{
 		"--all",
 		"api",

@@ -159,9 +159,6 @@ func Parse(rawArgs []string) (Config, error) {
 		case token == "--analyze":
 			cfg.Analyze = true
 			args = args[1:]
-		case token == "--all":
-			cfg.RestoreAll = true
-			args = args[1:]
 		case token == "--metrics-url" || strings.HasPrefix(token, "--metrics-url="):
 			value, consumed, err := parseStringFlag(args, "--metrics-url")
 			if err != nil {
@@ -325,13 +322,6 @@ func parseInlineValue(token string, flag string) (string, bool) {
 }
 
 func validateStrategy(cfg *Config, weightExplicitlySet bool, strategyExplicitlySet bool) error {
-	if cfg.RestoreAll {
-		if cfg.Service != "restore" || cfg.Action != "" {
-			return fmt.Errorf("--all requires command: restore")
-		}
-		return nil
-	}
-
 	switch cfg.Strategy {
 	case StrategyRolling:
 	case StrategyBlueGreen:

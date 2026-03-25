@@ -20,7 +20,6 @@ Usage: docker ztd [OPTIONS] SERVICE
 Rolling new Compose service version.
 
 Actions:
-  restore --all             global: restore all registered projects after host reboot
   switch                    blue-green only: switch active traffic between blue and green
   rollback                  canary only: route 100%% traffic to old containers
   cleanup                   blue-green/canary: cleanup inactive side and clear state
@@ -51,7 +50,6 @@ Options:
 
   Action-specific:
         --auto-cleanup DURATION switch/rollback actions only (example: 10m, 1h30m)
-        --all                   restore action only: process all registered projects
 
   Runtime analysis:
         --analyze               Enable runtime metrics analysis for blue-green/canary

@@ -2,7 +2,6 @@ package app
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"sort"
@@ -34,10 +33,6 @@ func (r *Runner) Run(ctx context.Context, cfg cli.Config) error {
 	composeAdapter, err := selectComposeAdapter(cfg)
 	if err != nil {
 		return err
-	}
-
-	if cfg.Service == "restore" && cfg.RestoreAll {
-		return r.restoreAllRegisteredProjects(ctx)
 	}
 
 	dockerClient := docker.NewClient(cfg.DockerArgs)
@@ -74,17 +69,6 @@ func (r *Runner) Run(ctx context.Context, cfg cli.Config) error {
 		r.log.Info("==> Bringing up services.")
 		if err := composeAdapter.Up(ctx, cfg.ComposeFiles, cfg.EnvFiles, "", cfg.UpDetached, false); err != nil {
 			return err
-		}
-		if !cfg.SkipAutoRegister {
-			projectID, registryPath, err := registerCurrentProjectForRestore(cfg)
-			if err != nil {
-				r.log.WithError(err).Warn("==> Failed to register project for automatic restore")
-			} else {
-				r.log.WithFields(logrus.Fields{
-					"projectID":    projectID,
-					"registryPath": registryPath,
-				}).Info("==> Project registered for automatic restore")
-			}
 		}
 
 		time.Sleep(5 * time.Second)
@@ -163,84 +147,6 @@ func (r *Runner) Run(ctx context.Context, cfg cli.Config) error {
 	default:
 		return fmt.Errorf("unsupported strategy: %s", cfg.Strategy)
 	}
-}
-
-func (r *Runner) restoreAllRegisteredProjects(ctx context.Context) error {
-	entries, sourcePath, err := loadRegisteredProjects()
-	if err != nil {
-		return err
-	}
-	if len(entries) == 0 {
-		r.log.Info("==> No registered projects found for restore.")
-		return nil
-	}
-	r.log.WithFields(logrus.Fields{
-		"projects": len(entries),
-		"source":   sourcePath,
-	}).Info("==> Starting restore of registered projects.")
-
-	var restoreErrs []error
-	var pruneIDs []string
-	for _, entry := range entries {
-		if !entry.Enabled {
-			continue
-		}
-		if missing := missingFiles(entry.ComposeFiles); len(missing) > 0 {
-			r.log.WithFields(logrus.Fields{
-				"projectID": entry.ID,
-				"missing":   missing,
-			}).Warn("==> Registry entry has missing compose files and will be removed")
-			pruneIDs = append(pruneIDs, entry.ID)
-			continue
-		}
-
-		err := withWorkingDirectory(entry.WorkingDir, func() error {
-			r.log.WithFields(logrus.Fields{
-				"projectID":  entry.ID,
-				"workingDir": entry.WorkingDir,
-			}).Info("==> Restoring project")
-
-			restoreCfg := cli.Config{
-				DockerArgs:        append([]string{}, entry.DockerArgs...),
-				ComposeFiles:      append([]string{}, entry.ComposeFiles...),
-				EnvFiles:          append([]string{}, entry.EnvFiles...),
-				TraefikConfigFile: entry.TraefikConfigFile,
-				Service:           "up",
-				UpDetached:        true,
-				SkipAutoRegister:  true,
-			}
-			if restoreCfg.TraefikConfigFile == "" {
-				restoreCfg.TraefikConfigFile = cli.DefaultTraefikConfig
-			}
-			return r.Run(ctx, restoreCfg)
-		})
-		if err != nil {
-			r.log.WithError(err).WithField("projectID", entry.ID).Error("==> Failed to restore project")
-			restoreErrs = append(restoreErrs, fmt.Errorf("project %s: %w", entry.ID, err))
-		}
-	}
-	if len(restoreErrs) > 0 {
-		return fmt.Errorf("restore completed with %d failure(s): %w", len(restoreErrs), errors.Join(restoreErrs...))
-	}
-	if len(pruneIDs) > 0 {
-		if err := removeRegisteredProjects(pruneIDs); err != nil {
-			r.log.WithError(err).Warn("==> Failed to remove invalid registry entries")
-		}
-	}
-
-	return nil
-}
-
-func missingFiles(paths []string) []string {
-	missing := make([]string, 0)
-	for _, p := range paths {
-		if _, err := os.Stat(p); err != nil {
-			if os.IsNotExist(err) {
-				missing = append(missing, p)
-			}
-		}
-	}
-	return missing
 }
 
 type composeServicesFile struct {
