@@ -157,6 +157,8 @@ Canary state:
 
 By default, the project registry is stored at `~/.ztd/registry/projects.json` for the user running the command. You can override this via `ZTD_REGISTRY_PATH`.
 
+Important: auto-cleanup is user-scoped. Registry entries are isolated per OS user, so if different users run `docker ztd` for different projects, each user needs their own systemd service and timer.
+
 Example service unit (`/etc/systemd/system/ztd-auto-cleanup.service`):
 
 ```ini
@@ -168,8 +170,7 @@ Wants=docker.service
 [Service]
 Type=oneshot
 User=deploy
-Environment=ZTD_REGISTRY_PATH=%h/.ztd/registry/projects.json
-WorkingDirectory=/srv/my-app
+Environment=ZTD_REGISTRY_PATH=~/.ztd/registry/projects.json
 ExecStart=/usr/bin/docker ztd auto-cleanup-run
 ```
 
