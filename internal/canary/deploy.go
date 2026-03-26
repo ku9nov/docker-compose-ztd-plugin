@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/ku9nov/docker-compose-ztd-plugin/internal/compose"
+	"github.com/ku9nov/docker-compose-ztd-plugin/internal/healthdiag"
 	"github.com/ku9nov/docker-compose-ztd-plugin/internal/metricsgate"
 	"github.com/ku9nov/docker-compose-ztd-plugin/internal/safeguard"
 	"github.com/ku9nov/docker-compose-ztd-plugin/internal/state"
@@ -37,6 +38,7 @@ type Options struct {
 type dockerOps interface {
 	HasHealthcheck(ctx context.Context, containerID string) (bool, error)
 	HealthStatus(ctx context.Context, containerID string) (string, error)
+	LogsTail(ctx context.Context, containerID string, tail int) (string, error)
 	Stop(ctx context.Context, containerIDs []string) error
 	Remove(ctx context.Context, containerIDs []string) error
 	Labels(ctx context.Context, containerID string) (map[string]string, error)
@@ -135,6 +137,7 @@ func (d *Deployer) deploy(ctx context.Context, opt Options) (err error) {
 			return err
 		}
 		if !ok {
+			healthdiag.LogUnhealthyContainerLogs(ctx, d.log, d.docker, newIDs, 20)
 			return fmt.Errorf("canary containers are not healthy")
 		}
 		if opt.WaitAfterHealthy > 0 {

@@ -3,12 +3,12 @@ package rollout
 import (
 	"context"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/sirupsen/logrus"
 
 	"github.com/ku9nov/docker-compose-ztd-plugin/internal/compose"
+	"github.com/ku9nov/docker-compose-ztd-plugin/internal/healthdiag"
 	"github.com/ku9nov/docker-compose-ztd-plugin/internal/safeguard"
 	"github.com/ku9nov/docker-compose-ztd-plugin/internal/traefik"
 )
@@ -106,7 +106,7 @@ func (u *Updater) Run(ctx context.Context, opt Options) (err error) {
 		}
 		if !ok {
 			u.log.Error("==> New containers are not healthy. Rolling back.")
-			u.logUnhealthyContainerLogs(ctx, newIDs, 20)
+			healthdiag.LogUnhealthyContainerLogs(ctx, u.log, u.docker, newIDs, 20)
 			_ = u.docker.Stop(ctx, newIDs)
 			_ = u.docker.Remove(ctx, newIDs)
 			guard.Disarm()
@@ -175,33 +175,6 @@ func (u *Updater) waitHealthy(ctx context.Context, containerIDs []string, expect
 		}
 	}
 	return okCount == expected, nil
-}
-
-func (u *Updater) logUnhealthyContainerLogs(ctx context.Context, containerIDs []string, tail int) {
-	for _, id := range containerIDs {
-		status, err := u.docker.HealthStatus(ctx, id)
-		if err != nil {
-			u.log.Warnf("==> Unable to read health status for container %s: %v", id, err)
-			continue
-		}
-		if status == "healthy" {
-			continue
-		}
-
-		logs, err := u.docker.LogsTail(ctx, id, tail)
-		if err != nil {
-			u.log.Warnf("==> Unable to read last %d log lines for container %s: %v", tail, id, err)
-			continue
-		}
-
-		logs = strings.TrimSpace(logs)
-		if logs == "" {
-			u.log.Warnf("==> Container %s is %s. Last %d log lines are empty.", id, status, tail)
-			continue
-		}
-
-		u.log.Errorf("==> Container %s is %s. Last %d log lines:\n%s", id, status, tail, logs)
-	}
 }
 
 func diffIDs(oldIDs []string, allIDs []string) []string {

@@ -38,6 +38,7 @@ func (m *composeMock) LogsFollowTail(context.Context, []string, string, int) err
 
 func (m *dockerMock) HasHealthcheck(context.Context, string) (bool, error) { return true, nil }
 func (m *dockerMock) HealthStatus(context.Context, string) (string, error) { return "healthy", nil }
+func (m *dockerMock) LogsTail(context.Context, string, int) (string, error) { return "", nil }
 func (m *dockerMock) Stop(_ context.Context, ids []string) error {
 	m.stop = append(m.stop, ids...)
 	return nil
