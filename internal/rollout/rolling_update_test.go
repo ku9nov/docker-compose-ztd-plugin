@@ -61,6 +61,7 @@ func (m *dockerMock) HasHealthcheck(context.Context, string) (bool, error) {
 	return true, nil
 }
 func (m *dockerMock) HealthStatus(context.Context, string) (string, error) { return "healthy", nil }
+func (m *dockerMock) LogsTail(context.Context, string, int) (string, error) { return "", nil }
 func (m *dockerMock) Stop(_ context.Context, ids []string) error {
 	cp := append([]string{}, ids...)
 	m.stopCalls = append(m.stopCalls, cp)
