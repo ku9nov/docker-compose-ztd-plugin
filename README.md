@@ -61,6 +61,7 @@ Go implementation advantage: no runtime dependency on `jq` or `yq`.
 ```bash
 docker ztd [OPTIONS] SERVICE
 docker ztd [OPTIONS] SERVICE ACTION
+docker ztd [OPTIONS] auto-cleanup-run
 ```
 
 Examples:
@@ -77,6 +78,7 @@ docker ztd --strategy=canary --weight=70 api
 docker ztd --strategy=canary api rollback
 docker ztd --strategy=canary --auto-cleanup=10m api rollback
 docker ztd --strategy=canary api cleanup
+docker ztd auto-cleanup-run
 ```
 
 Options:
@@ -103,12 +105,14 @@ Actions:
 - `switch` (blue-green only): flips active production traffic between blue and green
 - `rollback` (canary only): sets canary traffic to `0` (old receives `100%`)
 - `cleanup` (blue-green/canary): removes inactive containers and clears state file
+- `auto-cleanup-run`: processes overdue cleanup deadlines from state files
 
 Blue-green state:
 
 - stored at `.ztd/state/<compose_project>--<service>.json`
 - includes service name, strategy, blue/green container IDs, active color, and optional cleanup deadline
 - overdue `cleanupAt` entries are processed as a safety-net on every CLI startup
+- overdue entries can also be processed by a scheduler via `auto-cleanup-run`
 
 Canary state:
 
@@ -144,4 +148,67 @@ Canary state:
 
 - Avoid `container_name` and fixed host `ports` on services that need multi-replica rollout.
 - `nginx-proxy` mode remains not implemented.
+
+## Auto-cleanup scheduler (Linux)
+
+`--auto-cleanup` only writes cleanup deadlines into state files. To execute cleanup at those deadlines on servers, run `docker ztd auto-cleanup-run` periodically.
+
+### Recommended: systemd timer
+
+By default, the project registry is stored at `~/.ztd/registry/projects.json` for the user running the command. You can override this via `ZTD_REGISTRY_PATH`.
+
+Example service unit (`/etc/systemd/system/ztd-auto-cleanup.service`):
+
+```ini
+[Unit]
+Description=Run docker ztd overdue auto-cleanup
+After=docker.service
+Wants=docker.service
+
+[Service]
+Type=oneshot
+User=deploy
+Environment=ZTD_REGISTRY_PATH=%h/.ztd/registry/projects.json
+WorkingDirectory=/srv/my-app
+ExecStart=/usr/bin/docker ztd auto-cleanup-run
+```
+
+Example timer unit (`/etc/systemd/system/ztd-auto-cleanup.timer`):
+
+```ini
+[Unit]
+Description=Schedule docker ztd overdue auto-cleanup
+
+[Timer]
+OnCalendar=*:0/1
+Persistent=true
+Unit=ztd-auto-cleanup.service
+
+[Install]
+WantedBy=timers.target
+```
+
+Enable:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now ztd-auto-cleanup.timer
+sudo systemctl status ztd-auto-cleanup.timer
+```
+
+Logs:
+
+```bash
+journalctl -u ztd-auto-cleanup.service -f
+```
+
+The command uses a non-blocking file lock in `.ztd/state/.auto-cleanup.lock`, so overlapping timer runs are skipped safely.
+
+### Fallback: cron
+
+For hosts without systemd:
+
+```cron
+*/5 * * * * cd /srv/my-app && /usr/bin/docker ztd auto-cleanup-run >> /var/log/ztd-auto-cleanup.log 2>&1
+```
 

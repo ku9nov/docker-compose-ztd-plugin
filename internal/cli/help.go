@@ -16,6 +16,7 @@ func Usage() string {
 	return fmt.Sprintf(`
 Usage: docker ztd [OPTIONS] SERVICE
        docker ztd [OPTIONS] SERVICE ACTION
+       docker ztd [OPTIONS] auto-cleanup-run
 
 Rolling new Compose service version.
 
@@ -23,6 +24,7 @@ Actions:
   switch                    blue-green only: switch active traffic between blue and green
   rollback                  canary only: route 100%% traffic to old containers
   cleanup                   blue-green/canary: cleanup inactive side and clear state
+  auto-cleanup-run          process overdue cleanup deadlines from state files
 
 Options:
   General:

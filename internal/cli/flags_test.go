@@ -165,6 +165,31 @@ func TestParse_ActionDefaultsStrategyToBlueGreen(t *testing.T) {
 	}
 }
 
+func TestParse_AutoCleanupRunActionWithoutService(t *testing.T) {
+	cfg, err := Parse([]string{
+		"auto-cleanup-run",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Action != ActionAutoRun {
+		t.Fatalf("expected action %s, got %s", ActionAutoRun, cfg.Action)
+	}
+	if cfg.Service != "" {
+		t.Fatalf("expected empty service, got %s", cfg.Service)
+	}
+}
+
+func TestParse_AutoCleanupRunRejectsService(t *testing.T) {
+	_, err := Parse([]string{
+		"api",
+		"auto-cleanup-run",
+	})
+	if err == nil {
+		t.Fatal("expected parse error")
+	}
+}
+
 func TestParse_AutoCleanupRequiresSwitch(t *testing.T) {
 	_, err := Parse([]string{
 		"--strategy=blue-green",

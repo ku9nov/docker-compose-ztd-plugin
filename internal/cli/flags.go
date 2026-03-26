@@ -235,6 +235,15 @@ func Parse(rawArgs []string) (Config, error) {
 				return cfg, fmt.Errorf("unknown option: %s", token)
 			}
 
+			if cfg.Service == "" && cfg.Action == ActionDeploy && token == ActionAutoRun {
+				cfg.Action = ActionAutoRun
+				args = args[1:]
+				continue
+			}
+			if cfg.Action == ActionAutoRun {
+				return cfg, fmt.Errorf("unexpected token: %s", token)
+			}
+
 			if cfg.Service == "" {
 				cfg.Service = token
 				args = args[1:]
@@ -260,7 +269,7 @@ func Parse(rawArgs []string) (Config, error) {
 
 func isActionToken(token string) bool {
 	switch token {
-	case ActionSwitch, ActionCleanup, ActionRollback:
+	case ActionSwitch, ActionCleanup, ActionRollback, ActionAutoRun:
 		return true
 	default:
 		return false
@@ -336,6 +345,13 @@ func validateStrategy(cfg *Config, weightExplicitlySet bool, strategyExplicitlyS
 		}
 	}
 
+	if cfg.Action == ActionAutoRun {
+		if cfg.Service != "" {
+			return fmt.Errorf("%s does not accept SERVICE", ActionAutoRun)
+		}
+		return nil
+	}
+
 	if cfg.Action != ActionDeploy {
 		if !strategyExplicitlySet {
 			cfg.Strategy = defaultStrategyForAction(cfg.Action)
@@ -401,6 +417,8 @@ func requiredStrategyForAction(action string) (string, bool) {
 	case ActionRollback:
 		return StrategyCanary, true
 	case ActionCleanup:
+		return "", true
+	case ActionAutoRun:
 		return "", true
 	default:
 		return "", false

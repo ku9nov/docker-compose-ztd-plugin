@@ -30,6 +30,7 @@ const (
 	ActionSwitch   = "switch"
 	ActionCleanup  = "cleanup"
 	ActionRollback = "rollback"
+	ActionAutoRun  = "auto-cleanup-run"
 )
 
 type Config struct {
