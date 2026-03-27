@@ -111,6 +111,8 @@ func ApplyCanaryConfig(path string, input CanaryConfigInput) error {
 		}
 	}
 
+	pruneEmptyDynamicConfigSections(&cfg)
+
 	data, err := configio.MarshalYAML(cfg)
 	if err != nil {
 		return err

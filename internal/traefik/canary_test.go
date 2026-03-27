@@ -86,3 +86,30 @@ func TestApplyCanaryConfigTerminalWeightAllowsSingleSide(t *testing.T) {
 	assertContains(t, content, "name: api_new")
 	assertContains(t, content, "weight: 100")
 }
+
+func TestApplyCanaryConfig_OmitsTCPSectionWhenNoTCPRouters(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "dynamic_conf.yml")
+	err := ApplyCanaryConfig(path, CanaryConfigInput{
+		Service:        "api",
+		ProductionRule: "Host(`example.com`)",
+		Port:           "8080",
+		OldIDs:         []string{"aaaaaaaaaaaa111111111111"},
+		NewIDs:         []string{"bbbbbbbbbbbb222222222222"},
+		NewWeight:      10,
+	})
+	if err != nil {
+		t.Fatalf("apply config: %v", err)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	content := string(data)
+	assertNotContains(t, content, "\ntcp:")
+	if strings.HasPrefix(content, "tcp:") {
+		t.Fatalf("expected no tcp section in generated config, got:\n%s", content)
+	}
+}

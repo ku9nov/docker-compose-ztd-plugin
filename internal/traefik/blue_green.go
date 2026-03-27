@@ -110,6 +110,8 @@ func ApplyBlueGreenConfig(path string, input BlueGreenConfigInput) error {
 	delete(cfg.TCP.Routers, qaRouterName(input.Service, "tcp-host"))
 	delete(cfg.TCP.Routers, qaRouterName(input.Service, "tcp-ip"))
 
+	pruneEmptyDynamicConfigSections(&cfg)
+
 	data, err := configio.MarshalYAML(cfg)
 	if err != nil {
 		return err

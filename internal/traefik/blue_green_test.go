@@ -121,6 +121,36 @@ func TestApplyBlueGreenConfig_TCPQARoutersPerTCPRouter(t *testing.T) {
 	assertNotContains(t, content, "api-qa-tcp-ip:")
 }
 
+func TestApplyBlueGreenConfig_OmitsTCPSectionWhenNoTCPRouters(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "dynamic_conf.yml")
+	err := ApplyBlueGreenConfig(path, BlueGreenConfigInput{
+		Service:        "api",
+		Active:         state.ColorBlue,
+		ProductionRule: "Host(`example.com`)",
+		Port:           "8080",
+		BlueIDs:        []string{"aaaaaaaaaaaa111111111111"},
+		GreenIDs:       []string{"bbbbbbbbbbbb222222222222"},
+		QA: &state.QAModes{
+			Host: "green.example.com",
+		},
+	})
+	if err != nil {
+		t.Fatalf("apply config: %v", err)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	content := string(data)
+	assertNotContains(t, content, "\ntcp:")
+	if strings.HasPrefix(content, "tcp:") {
+		t.Fatalf("expected no tcp section in generated config, got:\n%s", content)
+	}
+}
+
 func assertContains(t *testing.T, content string, expected string) {
 	t.Helper()
 	if !strings.Contains(content, expected) {

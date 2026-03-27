@@ -192,3 +192,11 @@ func extractHealthCheck(labels map[string]string, serviceName string) *types.Hea
 	return hc
 }
 
+func pruneEmptyDynamicConfigSections(cfg *types.DynamicConfig) {
+	if cfg.HTTP != nil && len(cfg.HTTP.Routers) == 0 && len(cfg.HTTP.Services) == 0 {
+		cfg.HTTP = nil
+	}
+	if cfg.TCP != nil && len(cfg.TCP.Routers) == 0 && len(cfg.TCP.Services) == 0 {
+		cfg.TCP = nil
+	}
+}
