@@ -92,3 +92,22 @@ func TestRunAutoCleanupAcrossRegisteredProjects(t *testing.T) {
 		t.Fatalf("run auto cleanup: %v", err)
 	}
 }
+
+func TestEnsureTraefikConfigDirCreatesParentDir(t *testing.T) {
+	base := t.TempDir()
+	configPath := filepath.Join(base, "traefik", "dynamic_conf.yml")
+
+	if err := ensureTraefikConfigDir(configPath); err != nil {
+		t.Fatalf("ensure traefik config dir: %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(base, "traefik")); err != nil {
+		t.Fatalf("expected traefik directory to exist: %v", err)
+	}
+}
+
+func TestEnsureTraefikConfigDirEmptyPath(t *testing.T) {
+	if err := ensureTraefikConfigDir(""); err != nil {
+		t.Fatalf("empty config path should be ignored, got: %v", err)
+	}
+}

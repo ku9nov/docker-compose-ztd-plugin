@@ -65,6 +65,10 @@ func (r *Runner) Run(ctx context.Context, cfg cli.Config) error {
 	}
 
 	if cfg.Service == "up" {
+		if err := ensureTraefikConfigDir(cfg.TraefikConfigFile); err != nil {
+			return err
+		}
+
 		composeServices, err := collectComposeServices(cfg.ComposeFiles)
 		if err != nil {
 			return fmt.Errorf("failed to read compose services: %w", err)
@@ -294,6 +298,35 @@ func resolveTraefikConfigPath(projectDir string, traefikConfigFile string) strin
 		return path
 	}
 	return filepath.Join(projectDir, path)
+}
+
+func ensureTraefikConfigDir(traefikConfigFile string) error {
+	configPath := strings.TrimSpace(traefikConfigFile)
+	if configPath == "" {
+		return nil
+	}
+
+	dir := filepath.Dir(configPath)
+	if dir == "." || dir == "" {
+		return nil
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("failed to create Traefik config directory %q: %w", dir, err)
+	}
+
+	checkFile, err := os.CreateTemp(dir, ".ztd-perm-check-*")
+	if err != nil {
+		return fmt.Errorf(
+			"Traefik config directory %q is not writable for current user; fix owner/permissions and retry: %w",
+			dir,
+			err,
+		)
+	}
+	_ = checkFile.Close()
+	if err := os.Remove(checkFile.Name()); err != nil {
+		return fmt.Errorf("failed to clean temporary file in Traefik config directory %q: %w", dir, err)
+	}
+	return nil
 }
 
 type composeServicesFile struct {
