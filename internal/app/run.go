@@ -94,6 +94,10 @@ func (r *Runner) Run(ctx context.Context, cfg cli.Config) error {
 		return nil
 	}
 
+	if err := ensureNoConflictingActiveDeployment(cfg, store); err != nil {
+		return err
+	}
+
 	switch cfg.Strategy {
 	case cli.StrategyRolling:
 		updater := rollout.NewUpdater(r.log, composeAdapter, dockerClient, generator)
@@ -369,4 +373,69 @@ func selectComposeAdapter(cfg cli.Config) (compose.Adapter, error) {
 		return nil, fmt.Errorf("failed to initialize compose adapter: %w", err)
 	}
 	return adapter, nil
+}
+
+func ensureNoConflictingActiveDeployment(cfg cli.Config, store *state.Store) error {
+	if cfg.Action != cli.ActionDeploy {
+		return nil
+	}
+	if cfg.Strategy != cli.StrategyRolling && cfg.Strategy != cli.StrategyBlueGreen && cfg.Strategy != cli.StrategyCanary {
+		return nil
+	}
+	project, st, found, err := findDeploymentStateByService(store, cfg.Service)
+	if err != nil {
+		return err
+	}
+	if !found {
+		return nil
+	}
+	if st.Strategy == cfg.Strategy {
+		return nil
+	}
+	return fmt.Errorf(
+		"cannot run %s deploy for service %s while %s deployment cycle is active (key: %s); finish current cycle with %s",
+		cfg.Strategy,
+		cfg.Service,
+		st.Strategy,
+		project,
+		strategyFinishHint(st.Strategy),
+	)
+}
+
+func findDeploymentStateByService(store *state.Store, service string) (string, state.DeploymentState, bool, error) {
+	projects, err := store.ListProjects()
+	if err != nil {
+		return "", state.DeploymentState{}, false, err
+	}
+	var matchedProject string
+	var matchedState state.DeploymentState
+	for _, project := range projects {
+		st, err := store.Load(project)
+		if err != nil {
+			continue
+		}
+		if st.Service != service {
+			continue
+		}
+		if matchedProject != "" {
+			return "", state.DeploymentState{}, false, fmt.Errorf("multiple deployment states found for service %s", service)
+		}
+		matchedProject = project
+		matchedState = st
+	}
+	if matchedProject == "" {
+		return "", state.DeploymentState{}, false, nil
+	}
+	return matchedProject, matchedState, true, nil
+}
+
+func strategyFinishHint(strategy string) string {
+	switch strategy {
+	case state.StrategyBlueGreen:
+		return "--strategy=blue-green switch/cleanup"
+	case state.StrategyCanary:
+		return "--strategy=canary rollback/cleanup"
+	default:
+		return "cleanup for the active deployment strategy"
+	}
 }

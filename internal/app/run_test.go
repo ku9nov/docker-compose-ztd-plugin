@@ -4,12 +4,15 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/sirupsen/logrus"
 
 	"github.com/ku9nov/docker-compose-ztd-plugin/internal/cli"
 	"github.com/ku9nov/docker-compose-ztd-plugin/internal/registry"
+	"github.com/ku9nov/docker-compose-ztd-plugin/internal/state"
 )
 
 func TestRegisterCurrentWorkingDir(t *testing.T) {
@@ -109,5 +112,77 @@ func TestEnsureTraefikConfigDirCreatesParentDir(t *testing.T) {
 func TestEnsureTraefikConfigDirEmptyPath(t *testing.T) {
 	if err := ensureTraefikConfigDir(""); err != nil {
 		t.Fatalf("empty config path should be ignored, got: %v", err)
+	}
+}
+
+func TestEnsureNoConflictingActiveDeployment_BlocksDifferentStrategy(t *testing.T) {
+	store := state.NewStore(t.TempDir())
+	if err := store.Save("proj--helloworld", state.DeploymentState{
+		Service:   "helloworld",
+		Strategy:  state.StrategyBlueGreen,
+		Blue:      []string{"blue-1"},
+		Green:     []string{"green-1"},
+		Active:    state.ColorBlue,
+		CreatedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("save state: %v", err)
+	}
+
+	err := ensureNoConflictingActiveDeployment(cli.Config{
+		Service:  "helloworld",
+		Strategy: cli.StrategyRolling,
+		Action:   cli.ActionDeploy,
+	}, store)
+	if err == nil {
+		t.Fatal("expected conflict error")
+	}
+	if !strings.Contains(err.Error(), "cannot run rolling deploy") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestEnsureNoConflictingActiveDeployment_AllowsSameStrategy(t *testing.T) {
+	store := state.NewStore(t.TempDir())
+	if err := store.Save("proj--helloworld", state.DeploymentState{
+		Service:   "helloworld",
+		Strategy:  state.StrategyCanary,
+		Old:       []string{"old-1"},
+		New:       []string{"new-1"},
+		Weight:    10,
+		CreatedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("save state: %v", err)
+	}
+
+	err := ensureNoConflictingActiveDeployment(cli.Config{
+		Service:  "helloworld",
+		Strategy: cli.StrategyCanary,
+		Action:   cli.ActionDeploy,
+	}, store)
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+}
+
+func TestEnsureNoConflictingActiveDeployment_IgnoresNonDeployAction(t *testing.T) {
+	store := state.NewStore(t.TempDir())
+	if err := store.Save("proj--helloworld", state.DeploymentState{
+		Service:   "helloworld",
+		Strategy:  state.StrategyBlueGreen,
+		Blue:      []string{"blue-1"},
+		Green:     []string{"green-1"},
+		Active:    state.ColorBlue,
+		CreatedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("save state: %v", err)
+	}
+
+	err := ensureNoConflictingActiveDeployment(cli.Config{
+		Service:  "helloworld",
+		Strategy: cli.StrategyCanary,
+		Action:   cli.ActionCleanup,
+	}, store)
+	if err != nil {
+		t.Fatalf("expected no error for cleanup action, got: %v", err)
 	}
 }
