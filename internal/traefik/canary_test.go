@@ -28,6 +28,7 @@ func TestApplyCanaryConfig(t *testing.T) {
 				BackendPort:     "5222",
 				BackendBaseName: "api-xmpp",
 				EntryPoints:     []string{"xmpp"},
+				TLSEnabled:      true,
 			},
 		},
 		HealthCheck: &types.HealthChecks{
@@ -58,6 +59,7 @@ func TestApplyCanaryConfig(t *testing.T) {
 	assertContains(t, content, "name: api-xmpp_new")
 	assertContains(t, content, "address: aaaaaaaaaaaa:5222")
 	assertContains(t, content, "service: api-xmpp")
+	assertContains(t, content, "tls: {}")
 }
 
 func TestApplyCanaryConfigTerminalWeightAllowsSingleSide(t *testing.T) {

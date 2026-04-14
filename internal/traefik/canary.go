@@ -104,11 +104,7 @@ func ApplyCanaryConfig(path string, input CanaryConfigInput) error {
 			})
 		}
 		setOrDeleteWeightedTCPService(cfg.TCP.Services, tcp.RouterService, tcpWeighted)
-		cfg.TCP.Routers[tcp.RouterName] = types.TCPRouter{
-			Rule:        tcp.Rule,
-			Service:     tcp.RouterService,
-			EntryPoints: append([]string{}, tcp.EntryPoints...),
-		}
+		cfg.TCP.Routers[tcp.RouterName] = newTCPRouter(tcp.Rule, tcp.RouterService, tcp.EntryPoints, tcp.TLSEnabled)
 	}
 
 	pruneEmptyDynamicConfigSections(&cfg)

@@ -59,9 +59,10 @@ type TCPConfig struct {
 }
 
 type TCPRouter struct {
-	Rule        string   `yaml:"rule,omitempty"`
-	Service     string   `yaml:"service,omitempty"`
-	EntryPoints []string `yaml:"entryPoints,omitempty"`
+	Rule        string    `yaml:"rule,omitempty"`
+	Service     string    `yaml:"service,omitempty"`
+	EntryPoints []string  `yaml:"entryPoints,omitempty"`
+	TLS         *struct{} `yaml:"tls,omitempty"`
 }
 
 type TCPService struct {

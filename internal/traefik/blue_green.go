@@ -84,11 +84,7 @@ func ApplyBlueGreenConfig(path string, input BlueGreenConfigInput) error {
 		if input.Active == state.ColorGreen {
 			activeTCPService = greenTCPService
 		}
-		cfg.TCP.Routers[tcp.RouterName] = types.TCPRouter{
-			Rule:        tcp.Rule,
-			Service:     activeTCPService,
-			EntryPoints: append([]string{}, tcp.EntryPoints...),
-		}
+		cfg.TCP.Routers[tcp.RouterName] = newTCPRouter(tcp.Rule, activeTCPService, tcp.EntryPoints, tcp.TLSEnabled)
 
 		setOrDeleteTCPQARouter(
 			cfg.TCP.Routers,
@@ -96,6 +92,7 @@ func ApplyBlueGreenConfig(path string, input BlueGreenConfigInput) error {
 			tcpHostModeRule(input.QA),
 			greenTCPService,
 			tcp.EntryPoints,
+			tcp.TLSEnabled,
 		)
 		setOrDeleteTCPQARouter(
 			cfg.TCP.Routers,
@@ -103,6 +100,7 @@ func ApplyBlueGreenConfig(path string, input BlueGreenConfigInput) error {
 			appendRule(tcp.Rule, tcpIPModeExpr(input.QA)),
 			greenTCPService,
 			tcp.EntryPoints,
+			tcp.TLSEnabled,
 		)
 	}
 
@@ -240,16 +238,12 @@ func setOrDeleteQARouter(routers map[string]types.HTTPRouter, name string, rule 
 	}
 }
 
-func setOrDeleteTCPQARouter(routers map[string]types.TCPRouter, name string, rule string, service string, entryPoints []string) {
+func setOrDeleteTCPQARouter(routers map[string]types.TCPRouter, name string, rule string, service string, entryPoints []string, tlsEnabled bool) {
 	if strings.TrimSpace(rule) == "" {
 		delete(routers, name)
 		return
 	}
-	routers[name] = types.TCPRouter{
-		Rule:        rule,
-		Service:     service,
-		EntryPoints: append([]string{}, entryPoints...),
-	}
+	routers[name] = newTCPRouter(rule, service, entryPoints, tlsEnabled)
 }
 
 func serviceColorName(service string, color string) string {

@@ -29,6 +29,7 @@ func TestApplyBlueGreenConfig(t *testing.T) {
 				BackendPort:     "5222",
 				BackendBaseName: "api-xmpp",
 				EntryPoints:     []string{"xmpp"},
+				TLSEnabled:      true,
 			},
 		},
 		QA: &state.QAModes{
@@ -72,6 +73,7 @@ func TestApplyBlueGreenConfig(t *testing.T) {
 	assertContains(t, content, "HostSNI(`green.example.com`)")
 	assertContains(t, content, "api-qa-api-xmpp-tcp-ip:")
 	assertContains(t, content, "ClientIP(`10.0.0.0/24`)")
+	assertContains(t, content, "tls: {}")
 }
 
 func TestApplyBlueGreenConfig_TCPQARoutersPerTCPRouter(t *testing.T) {

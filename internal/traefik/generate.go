@@ -117,14 +117,7 @@ func (g *Generator) Generate(ctx context.Context, composeFiles []string, envFile
 		cfg.HTTP.Services[serviceName] = httpService
 
 		for _, tcp := range collectTCPRouterMeta(labels) {
-			router := types.TCPRouter{
-				Rule:    tcp.Rule,
-				Service: tcp.RouterService,
-			}
-			if len(tcp.EntryPoints) > 0 {
-				router.EntryPoints = tcp.EntryPoints
-			}
-			cfg.TCP.Routers[tcp.RouterName] = router
+			cfg.TCP.Routers[tcp.RouterName] = newTCPRouter(tcp.Rule, tcp.RouterService, tcp.EntryPoints, tcp.TLSEnabled)
 
 			tcpServers := make([]types.TCPServer, 0, len(endpoints))
 			for _, endpoint := range endpoints {

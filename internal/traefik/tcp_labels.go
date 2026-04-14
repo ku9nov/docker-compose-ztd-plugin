@@ -2,6 +2,7 @@ package traefik
 
 import (
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -12,6 +13,7 @@ type tcpRouterMeta struct {
 	BackendPort     string
 	BackendBaseName string
 	EntryPoints     []string
+	TLSEnabled      bool
 }
 
 type TCPRouteInput struct {
@@ -21,6 +23,7 @@ type TCPRouteInput struct {
 	BackendPort     string
 	BackendBaseName string
 	EntryPoints     []string
+	TLSEnabled      bool
 }
 
 func collectTCPRouterMeta(labels map[string]string) []tcpRouterMeta {
@@ -43,6 +46,7 @@ func collectTCPRouterMeta(labels map[string]string) []tcpRouterMeta {
 			BackendPort:     port,
 			BackendBaseName: normalizeTCPServiceBaseName(routerService),
 			EntryPoints:     splitEntryPoints(labels["traefik.tcp.routers."+name+".entrypoints"]),
+			TLSEnabled:      parseTLSLabel(labels["traefik.tcp.routers."+name+".tls"]),
 		})
 	}
 	return routers
@@ -59,6 +63,7 @@ func ExtractTCPRoutes(labels map[string]string) []TCPRouteInput {
 			BackendPort:     item.BackendPort,
 			BackendBaseName: item.BackendBaseName,
 			EntryPoints:     append([]string{}, item.EntryPoints...),
+			TLSEnabled:      item.TLSEnabled,
 		})
 	}
 	return routes
@@ -105,4 +110,12 @@ func splitEntryPoints(raw string) []string {
 		}
 	}
 	return out
+}
+
+func parseTLSLabel(raw string) bool {
+	enabled, err := strconv.ParseBool(strings.TrimSpace(raw))
+	if err != nil {
+		return false
+	}
+	return enabled
 }
