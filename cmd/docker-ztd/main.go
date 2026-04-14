@@ -28,7 +28,7 @@ func main() {
 		return
 	}
 
-	if cfg.Service == "" {
+	if cfg.Service == "" && cfg.Action != cli.ActionAutoRun {
 		fmt.Fprintln(os.Stderr, "SERVICE is missing")
 		fmt.Print(cli.Usage())
 		os.Exit(1)

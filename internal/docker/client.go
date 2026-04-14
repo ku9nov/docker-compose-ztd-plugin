@@ -73,6 +73,17 @@ func (c *Client) Remove(ctx context.Context, containerIDs []string) error {
 	return c.run(ctx, args...)
 }
 
+func (c *Client) LogsTail(ctx context.Context, containerID string, tail int) (string, error) {
+	args := append([]string{}, c.dockerArgs...)
+	args = append(args, "logs", "--tail", fmt.Sprintf("%d", tail), containerID)
+	cmd := exec.CommandContext(ctx, "docker", args...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("%w: %s", err, strings.TrimSpace(string(out)))
+	}
+	return string(out), nil
+}
+
 func (c *Client) inspect(ctx context.Context, format string, containerID string) (string, error) {
 	args := append([]string{}, c.dockerArgs...)
 	args = append(args, "inspect", "--format="+format, containerID)

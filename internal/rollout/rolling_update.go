@@ -8,6 +8,7 @@ import (
 	"github.com/sirupsen/logrus"
 
 	"github.com/ku9nov/docker-compose-ztd-plugin/internal/compose"
+	"github.com/ku9nov/docker-compose-ztd-plugin/internal/healthdiag"
 	"github.com/ku9nov/docker-compose-ztd-plugin/internal/safeguard"
 	"github.com/ku9nov/docker-compose-ztd-plugin/internal/traefik"
 )
@@ -33,6 +34,7 @@ type Updater struct {
 type dockerOps interface {
 	HasHealthcheck(ctx context.Context, containerID string) (bool, error)
 	HealthStatus(ctx context.Context, containerID string) (string, error)
+	LogsTail(ctx context.Context, containerID string, tail int) (string, error)
 	Stop(ctx context.Context, containerIDs []string) error
 	Remove(ctx context.Context, containerIDs []string) error
 }
@@ -104,6 +106,7 @@ func (u *Updater) Run(ctx context.Context, opt Options) (err error) {
 		}
 		if !ok {
 			u.log.Error("==> New containers are not healthy. Rolling back.")
+			healthdiag.LogUnhealthyContainerLogs(ctx, u.log, u.docker, newIDs, 20)
 			_ = u.docker.Stop(ctx, newIDs)
 			_ = u.docker.Remove(ctx, newIDs)
 			guard.Disarm()

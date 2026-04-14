@@ -42,6 +42,7 @@ func (m *dockerMock) Labels(_ context.Context, containerID string) (map[string]s
 		base["traefik.http.services.example.loadbalancer.healthCheck.timeout"] = "1s"
 		base["traefik.tcp.routers.example-xmpp.rule"] = "HostSNI(`*`)"
 		base["traefik.tcp.routers.example-xmpp.entrypoints"] = "xmpp"
+		base["traefik.tcp.routers.example-xmpp.tls"] = "true"
 		base["traefik.tcp.services.example-xmpp.loadbalancer.server.port"] = "5222"
 	}
 	return base, nil

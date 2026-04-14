@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 
 	"github.com/ku9nov/docker-compose-ztd-plugin/internal/compose"
@@ -107,7 +106,7 @@ func (g *Generator) Generate(ctx context.Context, composeFiles []string, envFile
 		}
 
 		httpService := types.HTTPService{
-			LoadBalancer: types.HTTPLoadBalancer{
+			LoadBalancer: &types.HTTPLoadBalancer{
 				Servers: httpServers,
 			},
 		}
@@ -117,34 +116,17 @@ func (g *Generator) Generate(ctx context.Context, composeFiles []string, envFile
 		}
 		cfg.HTTP.Services[serviceName] = httpService
 
-		for _, tcpName := range tcpRouterNames(labels) {
-			tcpRule := labels["traefik.tcp.routers."+tcpName+".rule"]
-			tcpServiceName := labels["traefik.tcp.routers."+tcpName+".service"]
-			if tcpServiceName == "" {
-				tcpServiceName = tcpName
-			}
-			tcpPort := labels["traefik.tcp.services."+tcpServiceName+".loadbalancer.server.port"]
-			if tcpRule == "" || tcpPort == "" {
-				continue
-			}
-
-			router := types.TCPRouter{
-				Rule:    tcpRule,
-				Service: tcpServiceName,
-			}
-			if eps := splitEntryPoints(labels["traefik.tcp.routers."+tcpName+".entrypoints"]); len(eps) > 0 {
-				router.EntryPoints = eps
-			}
-			cfg.TCP.Routers[tcpName] = router
+		for _, tcp := range collectTCPRouterMeta(labels) {
+			cfg.TCP.Routers[tcp.RouterName] = newTCPRouter(tcp.Rule, tcp.RouterService, tcp.EntryPoints, tcp.TLSEnabled)
 
 			tcpServers := make([]types.TCPServer, 0, len(endpoints))
 			for _, endpoint := range endpoints {
 				tcpServers = append(tcpServers, types.TCPServer{
-					Address: endpoint + ":" + tcpPort,
+					Address: endpoint + ":" + tcp.BackendPort,
 				})
 			}
-			cfg.TCP.Services[tcpServiceName] = types.TCPService{
-				LoadBalancer: types.TCPLoadBalancer{
+			cfg.TCP.Services[tcp.RouterService] = types.TCPService{
+				LoadBalancer: &types.TCPLoadBalancer{
 					Servers: tcpServers,
 				},
 			}
@@ -203,36 +185,11 @@ func extractHealthCheck(labels map[string]string, serviceName string) *types.Hea
 	return hc
 }
 
-func tcpRouterNames(labels map[string]string) []string {
-	set := map[string]struct{}{}
-	for key := range labels {
-		if strings.HasPrefix(key, "traefik.tcp.routers.") {
-			parts := strings.Split(key, ".")
-			if len(parts) >= 4 {
-				set[parts[3]] = struct{}{}
-			}
-		}
+func pruneEmptyDynamicConfigSections(cfg *types.DynamicConfig) {
+	if cfg.HTTP != nil && len(cfg.HTTP.Routers) == 0 && len(cfg.HTTP.Services) == 0 {
+		cfg.HTTP = nil
 	}
-
-	names := make([]string, 0, len(set))
-	for n := range set {
-		names = append(names, n)
+	if cfg.TCP != nil && len(cfg.TCP.Routers) == 0 && len(cfg.TCP.Services) == 0 {
+		cfg.TCP = nil
 	}
-	sort.Strings(names)
-	return names
-}
-
-func splitEntryPoints(raw string) []string {
-	if strings.TrimSpace(raw) == "" {
-		return nil
-	}
-	parts := strings.Split(raw, ",")
-	out := make([]string, 0, len(parts))
-	for _, p := range parts {
-		p = strings.TrimSpace(p)
-		if p != "" {
-			out = append(out, p)
-		}
-	}
-	return out
 }
