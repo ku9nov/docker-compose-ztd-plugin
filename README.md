@@ -81,6 +81,14 @@ docker ztd --strategy=canary api cleanup
 docker ztd auto-cleanup-run
 ```
 
+## Example Deployments (Recommended)
+
+**Looking for complete, ready-to-run examples with `helloworld` apps and deployment notes?**
+
+See: [docker-compose-deployments-examples](https://github.com/ku9nov/docker-compose-deployments-examples#)
+
+This companion repository includes expanded setup examples for rolling, blue-green, and canary flows, plus practical notes about behavior and trade-offs.
+
 Options:
 
 - `-h, --help`
@@ -142,6 +150,7 @@ Canary state:
 - `traefik.http.services.<name>.loadbalancer.healthCheck.status`
 - `traefik.tcp.routers.<name>.rule`
 - `traefik.tcp.routers.<name>.entrypoints`
+- `traefik.tcp.routers.<name>.tls`
 - `traefik.tcp.services.<name>.loadbalancer.server.port`
 
 ## Notes
