@@ -1,6 +1,14 @@
 # `docker ztd`
 
-Zero-downtime rollout plugin for Docker Compose.
+Zero-downtime deployment orchestration plugin for Docker Compose with rolling, blue-green, and canary rollouts plus controlled rollback management when needed.
+
+## Example Deployments (Recommended)
+
+**Looking for complete, ready-to-run examples with `helloworld` apps and deployment notes?**
+
+See: [docker-compose-deployments-examples](https://github.com/ku9nov/docker-compose-deployments-examples#)
+
+This companion repository includes expanded setup examples for rolling, blue-green, and canary flows, plus practical notes about behavior and trade-offs.
 
 ## Overview
 
@@ -80,14 +88,6 @@ docker ztd --strategy=canary --auto-cleanup=10m api rollback
 docker ztd --strategy=canary api cleanup
 docker ztd auto-cleanup-run
 ```
-
-## Example Deployments (Recommended)
-
-**Looking for complete, ready-to-run examples with `helloworld` apps and deployment notes?**
-
-See: [docker-compose-deployments-examples](https://github.com/ku9nov/docker-compose-deployments-examples#)
-
-This companion repository includes expanded setup examples for rolling, blue-green, and canary flows, plus practical notes about behavior and trade-offs.
 
 Options:
 
