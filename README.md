@@ -1,142 +1,173 @@
 # `docker ztd`
 
-Zero-downtime deployment orchestration plugin for Docker Compose with rolling, blue-green, and canary rollouts plus controlled rollback management when needed.
+Zero-downtime deployment orchestration plugin for Docker Compose with `rolling`, `blue-green`, and `canary` strategies.
 
-## Example Deployments (Recommended)
-
-**Looking for complete, ready-to-run examples with `helloworld` apps and deployment notes?**
-
-See: [docker-compose-deployments-examples](https://github.com/ku9nov/docker-compose-deployments-examples#)
-
-This companion repository includes expanded setup examples for rolling, blue-green, and canary flows, plus practical notes about behavior and trade-offs.
-
-## Overview
+> [!IMPORTANT]
+> `docker ztd` requires a `traefik` service in your `docker-compose.yml`.
+> The plugin will not work without Traefik present in the Compose project.
 
 `docker ztd` updates a running Compose service without dropping traffic:
 
-- scale service to 2x replicas
-- wait for new containers to become ready
-- switch Traefik dynamic config to new container IDs
-- remove old containers after a drain wait
+- scales service to additional replicas
+- waits for new containers to become ready
+- switches Traefik dynamic config to new container IDs
+- removes old containers after a drain wait
 
-You can use either implementation:
+## Example Deployments (Recommended)
 
-- Bash implementation (legacy, simple setup for some environments)
-- Go implementation (new modular implementation)
+For complete, ready-to-run `helloworld` examples and deployment notes, see:
 
-## Installation
+[docker-compose-deployments-examples](https://github.com/ku9nov/docker-compose-deployments-examples#)
 
-### Bash implementation
+## Quick Start (Go Implementation, Recommended)
 
-```bash
-curl -fsSL https://gist.githubusercontent.com/ku9nov/f76d2b7f65fa266a17c89e0a50880479/raw/9182ae94d16bea270a4228dd17be16f05e156041/install-docker-ztd.sh | bash
-```
+The Go implementation is the recommended path for most users.
 
-#### Bash dependencies
-
-You should have `jq` and `yq` installed on your server.
-
-When using the bash-based installation, you may need to create the Traefik folder manually depending on your Docker setup:
-
-```bash
-mkdir -p traefik
-chown -R $(id -u):$(id -g) traefik
-chmod -R 755 traefik
-```
-
-### Go implementation
-
-Install from the latest GitHub release automatically:
+### 1) Install
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/ku9nov/docker-compose-ztd-plugin/main/scripts/install-docker-ztd-go.sh | bash
 ```
 
-Manual build and install:
+### 2) Run your first deployment
 
 ```bash
-go build -o docker-ztd-go ./cmd/docker-ztd
-mkdir -p ~/.docker/cli-plugins
-cp docker-ztd-go ~/.docker/cli-plugins/docker-ztd
-chmod +x ~/.docker/cli-plugins/docker-ztd
+docker ztd -f docker-compose.yml up -d
 ```
 
-Go implementation advantage: no runtime dependency on `jq` or `yq`.
+### 3) Pick a strategy
+
+```bash
+# Rolling (default)
+docker ztd -f docker-compose.yml api
+
+# Blue-green
+docker ztd -f docker-compose.yml --strategy=blue-green --host-mode=green.example.com api
+docker ztd -f docker-compose.yml --strategy=blue-green api switch
+
+# Canary
+docker ztd -f docker-compose.yml --strategy=canary --weight=10 api
+docker ztd -f docker-compose.yml --strategy=canary --weight=70 api
+```
 
 ## Runtime Dependencies
 
 - Docker CLI
+- Traefik service in the same Compose project (`traefik`)
 - Compose support:
   - `docker compose` (preferred), or
   - `docker-compose` (fallback)
 
 ## Usage
 
-```bash
-docker ztd [OPTIONS] SERVICE
-docker ztd [OPTIONS] SERVICE ACTION
-docker ztd [OPTIONS] auto-cleanup-run
-```
-
-Examples:
+Always pass `-f docker-compose.yml` (or your custom compose file path).
 
 ```bash
-docker ztd -f docker-compose.yml <service-name>
-docker ztd -f docker-compose.yml up -d
-docker ztd --strategy=blue-green --host-mode=green.example.com api
-docker ztd --strategy=blue-green api switch
-docker ztd --strategy=blue-green --auto-cleanup=10m api switch
-docker ztd --strategy=blue-green api cleanup
-docker ztd --strategy=canary --weight=10 api
-docker ztd --strategy=canary --weight=70 api
-docker ztd --strategy=canary api rollback
-docker ztd --strategy=canary --auto-cleanup=10m api rollback
-docker ztd --strategy=canary api cleanup
+docker ztd -f docker-compose.yml [OPTIONS] SERVICE
+docker ztd -f docker-compose.yml [OPTIONS] SERVICE ACTION
 docker ztd auto-cleanup-run
 ```
 
-Options:
+## Strategy Examples
+
+### Rolling
+
+```bash
+docker ztd -f docker-compose.yml api
+```
+
+### Blue-green
+
+```bash
+docker ztd -f docker-compose.yml --strategy=blue-green --host-mode=green.example.com api
+docker ztd -f docker-compose.yml --strategy=blue-green api switch
+docker ztd -f docker-compose.yml --strategy=blue-green --auto-cleanup=10m api switch
+docker ztd -f docker-compose.yml --strategy=blue-green api cleanup
+```
+
+### Canary
+
+```bash
+docker ztd -f docker-compose.yml --strategy=canary --weight=10 api
+docker ztd -f docker-compose.yml --strategy=canary --weight=70 api
+docker ztd -f docker-compose.yml --strategy=canary api rollback
+docker ztd -f docker-compose.yml --strategy=canary --auto-cleanup=10m api rollback
+docker ztd -f docker-compose.yml --strategy=canary api cleanup
+```
+
+### Cleanup runner
+
+```bash
+docker ztd auto-cleanup-run
+```
+
+## Actions
+
+- `switch` (blue-green only): switch active traffic between blue and green
+- `rollback` (canary only): route `100%` traffic to old containers
+- `cleanup` (blue-green/canary): remove inactive containers and clear state
+- `auto-cleanup-run`: process overdue cleanup deadlines from state files
+
+## Options Reference
+
+### General
 
 - `-h, --help`
 - `-f, --file FILE`
+- `--env-file FILE`
 - `-t, --timeout N`
 - `-w, --wait N`
 - `--wait-after-healthy N`
-- `--env-file FILE`
-- `--proxy TYPE`
 - `--strategy TYPE` (`rolling` default, `blue-green`, `canary`)
+- `--proxy TYPE` (`traefik` default, `nginx-proxy`)
 - `--traefik-conf FILE`
-- `--host-mode VALUE` (blue-green only)
-- `--headers-mode HEADER=VALUE` (blue-green only, example: `X-Env=green`)
-- `--cookies-mode COOKIE=VALUE` (blue-green only, example: `env=green`)
-- `--ip-mode VALUE` (blue-green only)
-- `--weight N` (canary only, default: `10`)
-- `--to COLOR` (blue-green `switch` action only, `blue|green`)
-- `--auto-cleanup DURATION` (`switch`/`rollback` actions only, e.g. `10m`)
 
-Actions:
+### Blue-green
 
-- `switch` (blue-green only): flips active production traffic between blue and green
-- `rollback` (canary only): sets canary traffic to `0` (old receives `100%`)
-- `cleanup` (blue-green/canary): removes inactive containers and clears state file
-- `auto-cleanup-run`: processes overdue cleanup deadlines from state files
+- `--host-mode VALUE` (route by host, HTTP Host / TCP HostSNI)
+- `--headers-mode HEADER=VALUE` (HTTP only, example: `X-Env=green`)
+- `--cookies-mode COOKIE=VALUE` (HTTP only, example: `env=green`)
+- `--ip-mode VALUE` (route by client IP CIDR, HTTP/TCP)
+- `--to COLOR` (`switch` action only, `blue|green`)
 
-Blue-green state:
+### Canary
 
-- stored at `.ztd/state/<compose_project>--<service>.json`
-- includes service name, strategy, blue/green container IDs, active color, and optional cleanup deadline
-- overdue `cleanupAt` entries are processed as a safety-net on every CLI startup
-- overdue entries can also be processed by a scheduler via `auto-cleanup-run`
+- `--weight N` (default: `10`)
 
-Canary state:
+### Action-specific
 
-- stored in the same state directory and key pattern as blue-green
-- includes service name, strategy, old/new container IDs and current canary weight
-- cleanup is allowed only for terminal canary traffic states:
+- `--auto-cleanup DURATION` (`switch`/`rollback` actions only, example: `10m`)
+
+### Runtime analysis
+
+- `--analyze`
+- `--metrics-url URL`
+- `--analyze-window DURATION`
+- `--analyze-interval DURATION`
+- `--min-requests N`
+- `--max-5xx-ratio N`
+- `--max-4xx-ratio N` (`-1` disables)
+- `--max-mean-latency-ms N` (`-1` disables)
+
+## State Files
+
+State files are stored at:
+
+- `.ztd/state/<compose_project>--<service>.json`
+
+### Blue-green state
+
+- stores service, strategy, blue/green container IDs, active color, and optional cleanup deadline
+- overdue `cleanupAt` entries are processed as a safety net on CLI startup
+- overdue entries can also be processed by scheduler via `auto-cleanup-run`
+
+### Canary state
+
+- stores service, strategy, old/new container IDs, and current canary weight
+- `cleanup` is allowed only for terminal canary states:
   - new=`100` -> remove old
   - new=`0` -> remove new
   - intermediate weights are rejected to preserve rollback safety
-
 
 ## Traefik Labels Supported
 
@@ -159,22 +190,17 @@ Canary state:
 - `traefik.tcp.routers.<name>.tls`
 - `traefik.tcp.services.<name>.loadbalancer.server.port`
 
-## Notes
+## Operations: Auto-cleanup Scheduler (Linux)
 
-- Avoid `container_name` and fixed host `ports` on services that need multi-replica rollout.
-- `nginx-proxy` mode remains not implemented.
+`--auto-cleanup` writes cleanup deadlines into state files. To execute cleanup at those deadlines, run `docker ztd auto-cleanup-run` periodically.
 
-## Auto-cleanup scheduler (Linux)
+By default, project registry is stored at `~/.ztd/registry/projects.json` for the current OS user. You can override it with `ZTD_REGISTRY_PATH`.
 
-`--auto-cleanup` only writes cleanup deadlines into state files. To execute cleanup at those deadlines on servers, run `docker ztd auto-cleanup-run` periodically.
+Auto-cleanup is user-scoped. If different users run `docker ztd` for different projects, each user needs their own scheduler.
 
 ### Recommended: systemd timer
 
-By default, the project registry is stored at `~/.ztd/registry/projects.json` for the user running the command. You can override this via `ZTD_REGISTRY_PATH`.
-
-Important: auto-cleanup is user-scoped. Registry entries are isolated per OS user, so if different users run `docker ztd` for different projects, each user needs their own systemd service and timer.
-
-Example service unit (`/etc/systemd/system/ztd-auto-cleanup.service`):
+Service unit (`/etc/systemd/system/ztd-auto-cleanup.service`):
 
 ```ini
 [Unit]
@@ -189,7 +215,7 @@ Environment=ZTD_REGISTRY_PATH=~/.ztd/registry/projects.json
 ExecStart=/usr/bin/docker ztd auto-cleanup-run
 ```
 
-Example timer unit (`/etc/systemd/system/ztd-auto-cleanup.timer`):
+Timer unit (`/etc/systemd/system/ztd-auto-cleanup.timer`):
 
 ```ini
 [Unit]
@@ -218,13 +244,33 @@ Logs:
 journalctl -u ztd-auto-cleanup.service -f
 ```
 
-The command uses a non-blocking file lock in `.ztd/state/.auto-cleanup.lock`, so overlapping timer runs are skipped safely.
+To avoid overlapping runs, the command uses a non-blocking file lock at `.ztd/state/.auto-cleanup.lock`.
 
 ### Fallback: cron
 
 For hosts without systemd:
 
 ```cron
-*/5 * * * * cd /srv/my-app && /usr/bin/docker ztd auto-cleanup-run >> /var/log/ztd-auto-cleanup.log 2>&1
+*/5 * * * * /usr/bin/docker ztd auto-cleanup-run >> /var/log/ztd-auto-cleanup.log 2>&1
 ```
+
+## Legacy Bash Implementation (Minimal)
+
+Bash implementation is still available for legacy environments, but Go implementation is recommended for new setups.
+
+Install:
+
+```bash
+curl -fsSL https://gist.githubusercontent.com/ku9nov/f76d2b7f65fa266a17c89e0a50880479/raw/9182ae94d16bea270a4228dd17be16f05e156041/install-docker-ztd.sh | bash
+```
+
+Dependencies:
+
+- `jq`
+- `yq`
+
+## Notes
+
+- Avoid `container_name` and fixed host `ports` on services that need multi-replica rollout.
+- `nginx-proxy` mode is not implemented yet.
 
