@@ -46,7 +46,13 @@ chmod -R 755 traefik
 
 ### Go implementation
 
-There is no auto-install script for Go yet. Build and install manually:
+Install from the latest GitHub release automatically:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/ku9nov/docker-compose-ztd-plugin/main/scripts/install-docker-ztd-go.sh | bash
+```
+
+Manual build and install:
 
 ```bash
 go build -o docker-ztd-go ./cmd/docker-ztd
