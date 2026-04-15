@@ -4,11 +4,12 @@ on:
     push:
       branches:
         - main
+    workflow_dispatch:
 
 jobs:
   create-release:
     if: |
-      contains(github.event.head_commit.message, 'commit new version') == true
+      github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, 'commit new version') == true
     runs-on: ubuntu-latest
     outputs:
       release_upload_url: ${{ steps.create-release.outputs.upload_url }}
@@ -46,7 +47,7 @@ jobs:
 
   build-and-upload:
     if: |
-      contains(github.event.head_commit.message, 'commit new version') == true
+      github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, 'commit new version') == true
     needs: create-release
     runs-on: ubuntu-latest
     strategy:
@@ -58,12 +59,12 @@ jobs:
           - os: linux
             arch: arm64
             ext: ""
-          - os: windows
-            arch: amd64
-            ext: ".exe"
-          - os: windows
-            arch: arm64
-            ext: ".exe"
+        #   - os: windows
+        #     arch: amd64
+        #     ext: ".exe"
+        #   - os: windows
+        #     arch: arm64
+        #     ext: ".exe"
           - os: darwin
             arch: amd64
             ext: ""
